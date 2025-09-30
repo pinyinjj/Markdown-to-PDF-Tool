@@ -11,6 +11,15 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+# 开关：是否使用图片水印。默认关闭，使用文本水印。
+USE_IMAGE_WATERMARK = True
+
+# 当使用图片水印时，是否由文本自动生成图片水印
+GENERATE_IMAGE_FROM_TEXT = True
+
+# 生成的文本水印图片文件名
+TEXT_WATERMARK_FILE = "watermarks/text_watermark.png"
+
 
 def run_watermark_command(args: List[str]) -> tuple[str, str, int]:
     """运行watermark CLI命令并返回结果。"""
@@ -55,6 +64,97 @@ def find_watermark_image() -> Optional[str]:
     for ext in exts:
         candidates.extend([str(p) for p in base.glob(ext)])
     return candidates[0] if candidates else None
+
+# ========= 新增：将文本渲染为图片 (支持中文) =========
+
+def _find_chinese_font_path() -> Optional[str]:
+    """尝试在环境变量与常见路径查找中文字体，优先微软雅黑。"""
+    # 1) 环境变量优先
+    env_font = os.environ.get("WATERMARK_FONT")
+    if env_font and os.path.exists(env_font):
+        return env_font
+
+    # 2) 常见字体候选
+    candidates = [
+        # Windows 常见中文字体
+        r"C:\\Windows\\Fonts\\msyh.ttc",       # 微软雅黑
+        r"C:\\Windows\\Fonts\\msyhbd.ttc",     # 微软雅黑 Bold
+        r"C:\\Windows\\Fonts\\msyhl.ttc",      # 微软雅黑 Light
+        r"C:\\Windows\\Fonts\\simhei.ttf",     # 黑体
+        r"C:\\Windows\\Fonts\\simsun.ttc",     # 宋体
+        r"C:\\Windows\\Fonts\\simkai.ttf",     # 楷体
+        r"C:\\Windows\\Fonts\\simfang.ttf",    # 仿宋
+        r"C:\\Windows\\Fonts\\SourceHanSansCN-Normal.otf",
+        r"C:\\Windows\\Fonts\\NotoSansCJK-Regular.ttc",
+        r"C:\\Windows\\Fonts\\AlibabaPuHuiTi-2-55-Regular.ttf",
+        r"C:\\Windows\\Fonts\\HarmonyOS_Sans_SC_Regular.ttf",
+        # macOS
+        r"/System/Library/Fonts/PingFang.ttc",
+        r"/System/Library/Fonts/Hiragino Sans GB W3.ttc",
+        r"/Library/Fonts/Arial Unicode.ttf",
+        # Linux 常见安装路径
+        r"/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        r"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        r"/usr/share/fonts/opentype/noto/NotoSansCJKSC-Regular.otf",
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+
+    # 3) 额外在 Windows 字体目录中模糊查找
+    win_fonts = r"C:\\Windows\\Fonts"
+    if os.path.isdir(win_fonts):
+        try:
+            prefer_keys = [
+                "msyh", "simhei", "simsun", "sourcehansans", "notosanscjk",
+                "alibabapuhuiti", "harmonyos",
+            ]
+            for fname in os.listdir(win_fonts):
+                lower = fname.lower()
+                if any(k in lower for k in prefer_keys):
+                    full = os.path.join(win_fonts, fname)
+                    if os.path.isfile(full):
+                        return full
+        except Exception:
+            pass
+
+    return None
+
+
+def generate_text_watermark_image(text: str, out_path: str, font_size: int = 48, color=(68, 68, 68, 220), padding: int = 20) -> Optional[str]:
+    """将文本渲染为透明PNG图片，返回生成路径。失败返回None。"""
+    try:
+        from PIL import Image, ImageDraw, ImageFont  # type: ignore
+    except Exception:
+        print("✗ 缺少依赖: pillow。请先运行: pip install pillow")
+        return None
+
+    font_path = _find_chinese_font_path()
+    if not font_path:
+        print("✗ 未找到可用中文字体。请设置环境变量 WATERMARK_FONT 指向本地 *.ttf/*.ttc，或将中文字体安装到系统。")
+        return None
+
+    try:
+        font = ImageFont.truetype(font_path, font_size)
+    except Exception as e:
+        print(f"✗ 打开字体失败: {font_path} - {e}")
+        return None
+
+    # 先测量文本尺寸
+    dummy = Image.new("RGBA", (1, 1))
+    draw = ImageDraw.Draw(dummy)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+
+    img = Image.new("RGBA", (text_w + padding * 2, text_h + padding * 2), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.text((padding, padding), text, font=font, fill=color)
+
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    img.save(out_path)
+    print(f"✓ 文本水印图片已生成: {out_path} 使用字体: {font_path}")
+    return out_path
 
 
 def add_watermark_to_file(
@@ -267,7 +367,7 @@ def process_all_mds(input_dir: str = "input", output_dir: str = "output", waterm
     for md in md_files:
         out_pdf = output_path / f"{md.stem}.pdf"
         if md_to_pdf_with_mermaid(md, out_pdf):
-            # 转换后添加图片水印（45°网格）
+            # 转换后添加水印（根据全局开关使用图片或文本）
             if watermark_image:
                 add_watermark_to_file(
                     input_file=out_pdf,
@@ -281,6 +381,21 @@ def process_all_mds(input_dir: str = "input", output_dir: str = "output", waterm
                     opacity=0.2,
                     image_scale=1.0,
                 )
+            else:
+                add_watermark_to_file(
+                    input_file=out_pdf,
+                    output_file=out_pdf,
+                    watermark_image=None,
+                    watermark_text="云箭集团 - 刘子正 - 2025-09-30",
+                    watermark_type="grid",
+                    horizontal_boxes=3,
+                    vertical_boxes=6,
+                    angle=45,
+                    opacity=0.2,
+                    text_color="#444444",
+                    text_size=18,
+                    text_font="Helvetica",
+                )
             ok += 1
     print("=" * 50)
     print(f"✓ Markdown转换完成: {ok}/{len(md_files)} 成功")
@@ -288,19 +403,35 @@ def process_all_mds(input_dir: str = "input", output_dir: str = "output", waterm
 
 
 def main():
-    """主函数：优先为PDF添加水印；若无PDF，则转换Markdown到PDF(支持Mermaid)并添加45°图片水印。"""
+    """主函数：优先为PDF添加水印；若无PDF，则转换Markdown到PDF(支持Mermaid)并按开关添加水印。"""
     print("PDF Watermark Tool")
     print("=" * 50)
 
     input_dir = "input"
     output_dir = "output"
 
-    watermark_image = find_watermark_image()
-    if not watermark_image:
-        print("✗ 未在 watermarks/ 目录中找到水印图片(PNG/JPG/SVG)")
-        print("请将水印图片放入 watermarks/ 目录后重试")
-        return 1
-    print(f"✓ 使用水印图片: {watermark_image}")
+    watermark_text = "云箭集团 - 刘子正 - 2025-09-30"
+    watermark_image: Optional[str] = None
+
+    if USE_IMAGE_WATERMARK:
+        if GENERATE_IMAGE_FROM_TEXT and watermark_text:
+            generated = generate_text_watermark_image(watermark_text, TEXT_WATERMARK_FILE, font_size=36)
+            if generated:
+                watermark_image = generated
+            else:
+                watermark_image = find_watermark_image()
+        else:
+            watermark_image = find_watermark_image()
+        if not watermark_image:
+            print("✗ 未找到图片水印，且文本转图片失败")
+            print("已自动切换为文本水印模式")
+            USE = "text"
+        else:
+            USE = "image"
+    else:
+        USE = "text"
+
+    print(f"✓ 水印模式: {'图片' if USE == 'image' else '文本'}")
 
     pdf_files_present = len(get_pdf_files(Path(input_dir))) > 0
     if pdf_files_present:
@@ -312,19 +443,26 @@ def main():
         success = process_all_pdfs(
             input_dir=input_dir,
             output_dir=output_dir,
-            watermark_image=watermark_image,
-            watermark_text="云箭集团 - 刘子正",
+            watermark_image=watermark_image if USE == 'image' else None,
+            watermark_text=watermark_text,
             watermark_type="grid",
             horizontal_boxes=3,
             vertical_boxes=6,
             angle=45,
             opacity=0.2,
             image_scale=1.0,
+            text_color="#444444",
+            text_size=18,
+            text_font="Helvetica",
         )
         return 0 if success else 1
 
-    print("✓ 未找到PDF，将处理Markdown并转换为PDF (Mermaid) 并添加45°图片水印")
-    success = process_all_mds(input_dir=input_dir, output_dir=output_dir, watermark_image=watermark_image)
+    print("✓ 未找到PDF，将处理Markdown并转换为PDF (Mermaid) 并添加水印")
+    success = process_all_mds(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        watermark_image=watermark_image if USE == 'image' else None,
+    )
     return 0 if success else 1
 
 
