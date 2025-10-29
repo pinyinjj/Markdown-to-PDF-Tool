@@ -21,7 +21,7 @@
 ### 运行项目
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/pinyinjj/Markdown-to-PDF-Tool.git
 cd md-pdf-watermark
 python main.py
 ```
@@ -66,26 +66,6 @@ python main.py
    playwright install-deps
    ```
 
-### macOS 安装
-
-1. **安装Python**
-   ```bash
-   # 使用Homebrew
-   brew install python
-   
-   # 或从python.org下载
-   ```
-
-2. **安装依赖**
-   ```bash
-   pip install -r requirements.txt
-   playwright install
-   ```
-
-3. **系统依赖**（如果需要）
-   ```bash
-   playwright install-deps
-   ```
 
 ### Linux 安装
 
@@ -168,7 +148,6 @@ class WatermarkConfig:
 程序会自动检测系统中文字体，支持：
 
 - **Windows**: 微软雅黑、黑体、宋体、楷体、仿宋等
-- **macOS**: PingFang、Hiragino Sans GB等  
 - **Linux**: Noto Sans CJK等
 
 如需指定字体，可设置环境变量：
@@ -219,7 +198,7 @@ VERTICAL_BOXES = 8
 
 4. **权限问题**
    ```bash
-   # Linux/macOS
+   # Linux
    sudo playwright install-deps
    ```
 

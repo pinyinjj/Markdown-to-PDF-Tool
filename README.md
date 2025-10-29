@@ -71,26 +71,6 @@ The program will guide you through the modes:
    playwright install-deps
    ```
 
-### macOS
-
-1. **Install Python**
-   ```bash
-   # Using Homebrew
-   brew install python
-
-   # Or download from python.org
-   ```
-
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   playwright install
-   ```
-
-3. **System dependencies** (if needed)
-   ```bash
-   playwright install-deps
-   ```
 
 ### Linux
 
@@ -172,7 +152,6 @@ class WatermarkConfig:
 Common CJK fonts are auto-detected on:
 
 - **Windows**: Microsoft YaHei, SimHei, SimSun, Kai, FangSong, etc.
-- **macOS**: PingFang, Hiragino Sans GB, etc.
 - **Linux**: Noto Sans CJK, etc.
 
 Specify a custom font via env var:
@@ -225,7 +204,7 @@ VERTICAL_BOXES = 8
 
 4. **Permissions**
    ```bash
-   # Linux/macOS
+   # Linux
    sudo playwright install-deps
    ```
 
