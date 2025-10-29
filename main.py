@@ -11,7 +11,7 @@ import sys
 import argparse
 from pathlib import Path
 from typing import List, Optional
-from datetime import date
+from datetime import date, datetime
 
 # Import internationalization support
 from i18n import t, i18n
@@ -266,10 +266,10 @@ def get_pdf_files(input_dir: Path) -> List[Path]:
 
 def find_watermark_image() -> Optional[str]:
     """
-    在 watermarks/ 目录中选择一个水印图片(PNG/JPG/SVG)。
+    Select a watermark image (PNG/JPG/SVG) from the `watermarks/` directory.
     
     Returns:
-        Optional[str]: 找到的第一个图片文件路径，如果没有找到返回None
+        Optional[str]: First image file path found, or None if not found
     """
     candidates: List[str] = []
     base = Path("watermarks")
@@ -280,33 +280,33 @@ def find_watermark_image() -> Optional[str]:
         candidates.extend([str(p) for p in base.glob(ext)])
     return candidates[0] if candidates else None
 
-# ========= 新增：将文本渲染为图片 (支持中文) =========
+# ========= New: Render text to image (CJK supported) =========
 
 def get_today_str() -> str:
     """
-    返回今天的日期字符串，格式为 YYYY-MM-DD。
+    Return today's date string in the format YYYY-MM-DD.
     
     Returns:
-        str: 今天的日期字符串
+        str: Date string
     """
     return date.today().isoformat()
 
 def _get_font_candidates() -> List[str]:
     """
-    获取常见中文字体路径候选列表。
+    Get candidate paths for common CJK fonts.
     
     Returns:
-        List[str]: 中文字体文件路径列表，按优先级排序
+        List[str]: Font file paths in priority order
     """
     return [
-        # Windows 常见中文字体
-        r"C:\\Windows\\Fonts\\msyh.ttc",       # 微软雅黑
-        r"C:\\Windows\\Fonts\\msyhbd.ttc",     # 微软雅黑 Bold
-        r"C:\\Windows\\Fonts\\msyhl.ttc",      # 微软雅黑 Light
-        r"C:\\Windows\\Fonts\\simhei.ttf",     # 黑体
-        r"C:\\Windows\\Fonts\\simsun.ttc",     # 宋体
-        r"C:\\Windows\\Fonts\\simkai.ttf",     # 楷体
-        r"C:\\Windows\\Fonts\\simfang.ttf",    # 仿宋
+        # Windows common CJK fonts
+        r"C:\\Windows\\Fonts\\msyh.ttc",       # Microsoft YaHei
+        r"C:\\Windows\\Fonts\\msyhbd.ttc",     # Microsoft YaHei Bold
+        r"C:\\Windows\\Fonts\\msyhl.ttc",      # Microsoft YaHei Light
+        r"C:\\Windows\\Fonts\\simhei.ttf",     # SimHei
+        r"C:\\Windows\\Fonts\\simsun.ttc",     # SimSun
+        r"C:\\Windows\\Fonts\\simkai.ttf",     # KaiTi
+        r"C:\\Windows\\Fonts\\simfang.ttf",    # FangSong
         r"C:\\Windows\\Fonts\\SourceHanSansCN-Normal.otf",
         r"C:\\Windows\\Fonts\\NotoSansCJK-Regular.ttc",
         r"C:\\Windows\\Fonts\\AlibabaPuHuiTi-2-55-Regular.ttf",
@@ -315,7 +315,7 @@ def _get_font_candidates() -> List[str]:
         r"/System/Library/Fonts/PingFang.ttc",
         r"/System/Library/Fonts/Hiragino Sans GB W3.ttc",
         r"/Library/Fonts/Arial Unicode.ttf",
-        # Linux 常见安装路径
+        # Linux common install paths
         r"/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         r"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         r"/usr/share/fonts/opentype/noto/NotoSansCJKSC-Regular.otf",
@@ -324,10 +324,10 @@ def _get_font_candidates() -> List[str]:
 
 def _search_windows_fonts() -> Optional[str]:
     """
-    在Windows字体目录中模糊查找中文字体。
+    Fuzzy search for CJK fonts in the Windows fonts directory.
     
     Returns:
-        Optional[str]: 找到的中文字体路径，如果没有找到返回None
+        Optional[str]: Font path if found, else None
     """
     win_fonts = r"C:\\Windows\\Fonts"
     if not os.path.isdir(win_fonts):
@@ -353,57 +353,57 @@ def _search_windows_fonts() -> Optional[str]:
 
 def _find_chinese_font_path() -> Optional[str]:
     """
-    尝试在环境变量与常见路径查找中文字体，优先微软雅黑。
+    Look for a CJK font via env var and common paths.
     
     Returns:
-        Optional[str]: 找到的中文字体路径，如果没有找到返回None
+        Optional[str]: Font path if found, else None
     """
-    # 1) 环境变量优先
+    # 1) Environment variable first
     env_font = os.environ.get("WATERMARK_FONT")
     if env_font and os.path.exists(env_font):
         return env_font
 
-    # 2) 常见字体候选
+    # 2) Common font candidates
     for font_path in _get_font_candidates():
         if os.path.exists(font_path):
             return font_path
 
-    # 3) Windows字体目录模糊查找
+    # 3) Fuzzy search in Windows fonts directory
     return _search_windows_fonts()
 
 
 def generate_text_watermark_image(text: str, out_path: str, font_size: int = 48, color=(68, 68, 68, 220), padding: int = 20) -> Optional[str]:
     """
-    将文本渲染为透明PNG图片，返回生成路径。失败返回None。
+    Render text to a transparent PNG image and return the generated path.
     
     Args:
-        text: 要渲染的文本内容
-        out_path: 输出图片路径
-        font_size: 字体大小，默认48
-        color: 文本颜色RGBA元组，默认(68, 68, 68, 220)
-        padding: 内边距，默认20
+        text: Text content to render
+        out_path: Output image path
+        font_size: Font size, default 48
+        color: RGBA tuple for text color, default (68, 68, 68, 220)
+        padding: Padding in pixels, default 20
         
     Returns:
-        Optional[str]: 生成的图片路径，失败时返回None
+        Optional[str]: Generated image path, or None on failure
     """
     try:
         from PIL import Image, ImageDraw, ImageFont  # type: ignore
     except Exception:
-        print("✗ 缺少依赖: pillow。请先运行: pip install pillow")
+        print("✗ " + t('missing_dependency_pillow'))
         return None
 
     font_path = _find_chinese_font_path()
     if not font_path:
-        print("✗ 未找到可用中文字体。请设置环境变量 WATERMARK_FONT 指向本地 *.ttf/*.ttc，或将中文字体安装到系统。")
+        print("✗ " + t('chinese_font_not_found'))
         return None
 
     try:
         font = ImageFont.truetype(font_path, font_size)
     except Exception as e:
-        print(f"✗ 打开字体失败: {font_path} - {e}")
+        print("✗ " + t('open_font_failed', font=font_path, error=str(e)))
         return None
 
-    # 先测量文本尺寸
+    # Measure text size first
     dummy = Image.new("RGBA", (1, 1))
     draw = ImageDraw.Draw(dummy)
     bbox = draw.textbbox((0, 0), text, font=font)
@@ -416,7 +416,7 @@ def generate_text_watermark_image(text: str, out_path: str, font_size: int = 48,
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path)
-    print(f"✓ 文本水印图片已生成: {out_path} 使用字体: {font_path}")
+    print("✓ " + t('text_watermark_image_generated', path=out_path, font=font_path))
     return out_path
 
 
@@ -431,20 +431,20 @@ def add_watermark_to_file(
     **kwargs
 ) -> bool:
     """
-    为单个PDF文件添加水印。
+    Add a watermark to a single PDF file.
     
     Args:
-        input_file: 输入PDF文件路径
-        output_file: 输出PDF文件路径
-        watermark_image: 水印图片路径
-        watermark_type: 水印类型，默认"grid"
-        opacity: 透明度，默认0.2
-        angle: 旋转角度，默认45度
-        image_scale: 图片缩放比例，默认1.0
-        **kwargs: 其他参数，如horizontal_boxes, vertical_boxes等
+        input_file: Input PDF file path
+        output_file: Output PDF file path
+        watermark_image: Watermark image path
+        watermark_type: Watermark type, default "grid"
+        opacity: Opacity, default 0.2
+        angle: Rotation angle in degrees, default 45
+        image_scale: Image scale, default 1.0
+        **kwargs: Additional parameters such as horizontal_boxes, vertical_boxes
         
     Returns:
-        bool: 处理成功返回True，失败返回False
+        bool: True if succeeded, False otherwise
     """
     args = [
         watermark_type,
@@ -469,9 +469,9 @@ def add_watermark_to_file(
 
     stdout, stderr, return_code = run_watermark_command(args)
     if return_code != 0:
-        print(f"✗ 处理文件 {input_file.name} 失败: {stderr}")
+        print("✗ " + t('processing_failed_with_error', file=input_file.name, error=stderr))
         return False
-    print(f"✓ 成功处理: {input_file.name} -> {output_file.name}")
+    print("✓ " + t('processing_successful', src=input_file.name, dst=output_file.name))
     return True
 
 
@@ -483,33 +483,33 @@ def process_all_pdfs(
     **kwargs
 ) -> bool:
     """
-    处理输入目录中的所有PDF文件。
+    Process all PDF files in the input directory.
     
     Args:
-        input_dir: 输入目录路径，默认"input"
-        output_dir: 输出目录路径，默认"output"
-        watermark_image: 水印图片路径
-        watermark_type: 水印类型，默认"grid"
-        **kwargs: 其他水印参数
+        input_dir: Input directory path, default "input"
+        output_dir: Output directory path, default "output"
+        watermark_image: Watermark image path
+        watermark_type: Watermark type, default "grid"
+        **kwargs: Other watermark parameters
         
     Returns:
-        bool: 所有文件处理成功返回True，否则返回False
+        bool: True if all files succeeded, else False
     """
     input_path = Path(input_dir)
     output_path = Path(output_dir)
     if not input_path.exists():
-        print(f"✗ 输入目录不存在: {input_dir}")
+        print("✗ " + t('input_directory_not_exists', directory=input_dir))
         return False
-    output_path.mkdir(exist_ok=True)
+    output_path.mkdir(parents=True, exist_ok=True)
 
     pdf_files = get_pdf_files(input_path)
     if not pdf_files:
-        print(f"✗ 在 {input_dir} 目录中未找到PDF文件")
+        print("✗ " + t('no_pdf_files_in_directory', directory=input_dir))
         return False
 
-    print(f"✓ 找到 {len(pdf_files)} 个PDF文件")
-    print(f"✓ 水印图片: {watermark_image}")
-    print(f"✓ 水印类型: {watermark_type}")
+    print("✓ " + t('found_pdf_files', count=len(pdf_files)))
+    print(f"✓ {t('watermark_image')}: {watermark_image}")
+    print(f"✓ {t('watermark_type')}: {watermark_type}")
     print("=" * 50)
 
     success_count = 0
@@ -526,24 +526,24 @@ def process_all_pdfs(
             success_count += 1
 
     print("=" * 50)
-    print(f"✓ 处理完成: {success_count}/{total_count} 个文件成功")
+    print("✓ " + t('pdf_processing_completed', success=success_count, total=total_count))
     if success_count < total_count:
-        print(f"✗ {total_count - success_count} 个文件处理失败")
+        print("✗ " + t('processing_failed'))
         return False
     return True
 
 
-# ========= 新增：Markdown -> PDF (支持Mermaid) =========
+# ========= New: Markdown -> PDF (Mermaid supported) =========
 
 def get_md_files(input_dir: Path) -> List[Path]:
     """
-    获取输入目录中的所有Markdown文件。
+    Get all Markdown files in the input directory.
     
     Args:
-        input_dir: 输入目录路径
+        input_dir: Input directory path
         
     Returns:
-        List[Path]: 排序后的Markdown文件路径列表
+        List[Path]: Sorted list of Markdown file paths
     """
     md_files: List[Path] = []
     for pattern in ["*.md", "*.MD", "*.markdown"]:
@@ -553,24 +553,24 @@ def get_md_files(input_dir: Path) -> List[Path]:
 
 def md_to_pdf_with_mermaid(md_path: Path, out_pdf: Path) -> bool:
     """
-    将Markdown转换为支持Mermaid的PDF，使用Playwright渲染。
+    Convert Markdown to a Mermaid-supported PDF using Playwright.
     
     Args:
-        md_path: 输入Markdown文件路径
-        out_pdf: 输出PDF文件路径
+        md_path: Input Markdown file path
+        out_pdf: Output PDF file path
         
     Returns:
-        bool: 转换成功返回True，失败返回False
+        bool: True if succeeded, False otherwise
     """
     try:
         import markdown  # type: ignore
     except Exception:
-        print("✗ 缺少依赖: markdown。请先运行: pip install markdown")
+        print("✗ " + t('missing_dependency_markdown'))
         return False
     try:
         from playwright.sync_api import sync_playwright  # type: ignore
     except Exception:
-        print("✗ 缺少依赖: playwright。请先运行: pip install playwright && playwright install")
+        print("✗ " + t('missing_dependency_playwright'))
         return False
 
     html_body = markdown.markdown(
@@ -625,7 +625,7 @@ img {{ max-width: 100%; }}
 </html>
 """
 
-    out_pdf.parent.mkdir(exist_ok=True)
+    out_pdf.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         with sync_playwright() as p:
@@ -638,10 +638,10 @@ img {{ max-width: 100%; }}
                 pass
             page.pdf(path=str(out_pdf), print_background=True, prefer_css_page_size=True)
             browser.close()
-        print(f"✓ 转换成功: {md_path.name} -> {out_pdf.name}")
+        print("✓ " + t('conversion_successful', input_file=md_path.name, output_file=out_pdf.name))
         return True
     except Exception as e:
-        print(f"✗ 转换失败: {md_path.name} - {e}")
+        print("✗ " + t('conversion_failed_with_error', file=md_path.name, error=str(e)))
         return False
 
 
@@ -652,37 +652,37 @@ def process_all_mds(
     config: Optional[dict] = None,
 ) -> bool:
     """
-    处理输入目录中的所有Markdown文件，转换为PDF并添加水印。
+    Process all Markdown files, convert to PDF, and add watermark.
     
     Args:
-        input_dir: 输入目录路径，默认"input"
-        output_dir: 输出目录路径，默认"output"
-        watermark_image: 水印图片路径
-        config: 用户配置字典
+        input_dir: Input directory path, default "input"
+        output_dir: Output directory path, default "output"
+        watermark_image: Watermark image path
+        config: User configuration dictionary
         
     Returns:
-        bool: 所有文件处理成功返回True，否则返回False
+        bool: True if all files succeeded, else False
     """
     input_path = Path(input_dir)
     output_path = Path(output_dir)
     if not input_path.exists():
-        print(f"✗ 输入目录不存在: {input_dir}")
+        print("✗ " + t('input_directory_not_exists', directory=input_dir))
         return False
-    output_path.mkdir(exist_ok=True)
+    output_path.mkdir(parents=True, exist_ok=True)
 
     md_files = get_md_files(input_path)
     if not md_files:
-        print(f"✗ 在 {input_dir} 目录中未找到Markdown文件")
+        print("✗ " + t('no_md_files_in_directory', directory=input_dir))
         return False
 
-    print(f"✓ 找到 {len(md_files)} 个Markdown文件 (Mermaid支持)")
+    print("✓ " + t('found_md_files', count=len(md_files)))
     ok = 0
     for md in md_files:
         out_pdf = output_path / f"{md.stem}.pdf"
         if md_to_pdf_with_mermaid(md, out_pdf):
-            # 转换后添加水印（仅使用图片水印）
+            # After conversion, add watermark (image watermark only)
             if watermark_image:
-                # 使用用户配置或默认值
+                # Use user configuration or defaults
                 watermark_type = config.get("watermark_type", WatermarkConfig.WATERMARK_TYPE) if config else WatermarkConfig.WATERMARK_TYPE
                 horizontal_boxes = config.get("horizontal_boxes", WatermarkConfig.HORIZONTAL_BOXES) if config else WatermarkConfig.HORIZONTAL_BOXES
                 vertical_boxes = config.get("vertical_boxes", WatermarkConfig.VERTICAL_BOXES) if config else WatermarkConfig.VERTICAL_BOXES
@@ -703,40 +703,60 @@ def process_all_mds(
                 )
             ok += 1
     print("=" * 50)
-    print(f"✓ Markdown转换完成: {ok}/{len(md_files)} 成功")
+    print("✓ " + t('md_conversion_completed', success=ok, total=len(md_files)))
     return ok == len(md_files)
 
 
 def _setup_watermark_image(config: dict) -> Optional[str]:
     """
-    设置水印图片，优先从文本生成。
+    Set up the watermark image, preferring generation from text.
     
     Args:
-        config: 用户配置字典
+        config: User configuration dictionary
         
     Returns:
-        Optional[str]: 水印图片路径，如果无法获取返回None
+        Optional[str]: Path to watermark image, or None if unavailable
     """
-    # 如果指定了图片水印
+    # If an image watermark is explicitly provided
     if config.get("type") == "image" and "image" in config:
         if os.path.exists(config["image"]):
             return config["image"]
         else:
-            print(f"✗ 指定的水印图片不存在: {config['image']}")
+            print("✗ " + t('image_file_not_found') + f": {config['image']}")
             return None
     
-    # 从文本生成水印图片
+    # Generate watermark image from text
     if config.get("type") == "text" and "text" in config:
-        # 构建水印文本
+        # Build watermark text for image content (optionally append date for display)
         if config.get("add_date", True):
             watermark_text = f"{config['text']} - {get_today_str()}"
         else:
             watermark_text = config["text"]
-        
-        # 生成文本水印图片
+
+        # Build output filename based on text + digits-only timestamp (no special chars)
+        def _sanitize_filename(value: str) -> str:
+            # Keep letters, numbers, underscore, hyphen, and space; replace others with '_'
+            safe = []
+            for ch in value:
+                if ch.isalnum() or ch in ['_', '-', ' ']:
+                    safe.append(ch)
+                else:
+                    safe.append('_')
+            # Collapse spaces to '_' and limit length
+            name = ''.join(safe).strip()
+            name = '_'.join(name.split())
+            return name[:80] if len(name) > 80 else name
+
+        base_text_for_filename = _sanitize_filename(config["text"]) or "watermark"
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        out_dir = Path("watermarks")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = str(out_dir / f"{base_text_for_filename}_{timestamp}.png")
+
+        # Generate the text watermark image
         generated = generate_text_watermark_image(
-            watermark_text, 
-            WatermarkConfig.TEXT_WATERMARK_FILE, 
+            watermark_text,
+            out_path,
             font_size=config.get("font_size", WatermarkConfig.FONT_SIZE),
             color=config.get("text_color", WatermarkConfig.TEXT_COLOR),
             padding=config.get("padding", WatermarkConfig.PADDING)
@@ -746,29 +766,29 @@ def _setup_watermark_image(config: dict) -> Optional[str]:
         else:
             return find_watermark_image()
     
-    # 回退到查找现有水印图片
+    # Fallback: find an existing watermark image if generation fails
     return find_watermark_image()
 
 
 def _process_pdf_files(input_dir: str, output_dir: str, watermark_image: str, config: dict) -> bool:
     """
-    处理PDF文件添加水印。
+    Process PDF files and add watermark.
     
     Args:
-        input_dir: 输入目录路径
-        output_dir: 输出目录路径
-        watermark_image: 水印图片路径
-        config: 用户配置字典
+        input_dir: Input directory path
+        output_dir: Output directory path
+        watermark_image: Watermark image path
+        config: User configuration dictionary
         
     Returns:
-        bool: 处理成功返回True，失败返回False
+        bool: True on success, else False
     """
     if not check_watermark_tool():
-        print("✗ Watermark CLI工具未找到")
-        print("请先安装pdf-watermark:\n  pip install pdf-watermark")
+        print("✗ " + t('watermark_cli_not_found'))
+        print(t('install_pdf_watermark_hint'))
         return False
     
-    print("✓ Watermark CLI工具可用")
+    print("✓ " + t('watermark_cli_available'))
     return process_all_pdfs(
         input_dir=input_dir,
         output_dir=output_dir,
@@ -784,18 +804,18 @@ def _process_pdf_files(input_dir: str, output_dir: str, watermark_image: str, co
 
 def _process_markdown_files(input_dir: str, output_dir: str, watermark_image: str, config: dict) -> bool:
     """
-    处理Markdown文件转换为PDF并添加水印。
+    Convert Markdown files to PDF and add watermark.
     
     Args:
-        input_dir: 输入目录路径
-        output_dir: 输出目录路径
-        watermark_image: 水印图片路径
-        config: 用户配置字典
+        input_dir: Input directory path
+        output_dir: Output directory path
+        watermark_image: Watermark image path
+        config: User configuration dictionary
         
     Returns:
-        bool: 处理成功返回True，失败返回False
+        bool: True on success, else False
     """
-    print("✓ 未找到PDF，将处理Markdown并转换为PDF (Mermaid) 并添加水印")
+    print("✓ " + t('no_pdf_found_processing_md'))
     return process_all_mds(
         input_dir=input_dir,
         output_dir=output_dir,
@@ -806,19 +826,19 @@ def _process_markdown_files(input_dir: str, output_dir: str, watermark_image: st
 
 def _process_markdown_files_no_watermark(input_dir: str, output_dir: str, config: dict) -> bool:
     """
-    处理Markdown文件转换为PDF（无水印）。
+    Convert Markdown files to PDF (no watermark).
     
     Args:
-        input_dir: 输入目录路径
-        output_dir: 输出目录路径
-        config: 用户配置字典
+        input_dir: Input directory path
+        output_dir: Output directory path
+        config: User configuration dictionary
         
     Returns:
-        bool: 处理成功返回True，失败返回False
+        bool: True on success, else False
     """
     print("✓ " + t('start_converting_md_no_watermark'))
     
-    # 获取Markdown文件
+    # Get Markdown files
     md_files = get_md_files(Path(input_dir))
     if not md_files:
         print("✗ " + t('no_md_files_in_directory', directory=input_dir))
@@ -826,7 +846,7 @@ def _process_markdown_files_no_watermark(input_dir: str, output_dir: str, config
 
     print("✓ " + t('found_md_files', count=len(md_files)))
     
-    # 转换Markdown到PDF（无水印）
+    # Convert Markdown to PDF (no watermark)
     success_count = 0
     for md_file in md_files:
         try:
@@ -919,13 +939,13 @@ def main():
             "verbose": False
         }
     
-    # 如果是仅生成水印模式
+    # If watermark-only mode
     if config.get("mode") == "watermark_only":
         print()
         print("=" * 50)
         print(t('start_generating_watermark'))
         
-        # 设置水印图片
+        # Set up watermark image
         watermark_image = _setup_watermark_image(config)
         if not watermark_image:
             print("✗ " + t('watermark_image_not_found'))
@@ -935,7 +955,7 @@ def main():
         print("✓ " + t('watermark_generation_completed'))
         return 0
     
-    # 如果是无水印模式
+    # If no-watermark mode
     if config.get("mode") == "markdown_no_watermark":
         print()
         print("=" * 50)
@@ -944,14 +964,14 @@ def main():
         input_dir = config["input_dir"]
         output_dir = config["output_dir"]
         
-        # 直接转换Markdown，不添加水印
+        # Convert Markdown directly without adding watermark
         success = _process_markdown_files_no_watermark(input_dir, output_dir, config)
         return 0 if success else 1
     
     input_dir = config["input_dir"]
     output_dir = config["output_dir"]
 
-    # 设置水印图片
+    # Set up watermark image
     watermark_image = _setup_watermark_image(config)
     if not watermark_image:
         print("✗ " + t('watermark_image_not_found'))
@@ -960,21 +980,21 @@ def main():
     print()
     print("=" * 50)
     print(t('start_processing_files'))
-    print(f"✓ {t('watermark_mode')}: 图片")
+    print(f"✓ {t('watermark_type')}: {config.get('watermark_type', WatermarkConfig.WATERMARK_TYPE)}")
     if config.get("verbose", False):
         print(f"✓ {t('input_directory')}: {input_dir}")
         print(f"✓ {t('output_directory')}: {output_dir}")
         print(f"✓ {t('watermark_image')}: {watermark_image}")
 
-    # 根据模式选择处理方式
+    # Choose processing method by mode
     if config.get("mode") == "pdf":
-        # 处理PDF文件
+        # Process PDF files
         success = _process_pdf_files(input_dir, output_dir, watermark_image, config)
     elif config.get("mode") == "markdown":
-        # 处理Markdown文件
+        # Process Markdown files
         success = _process_markdown_files(input_dir, output_dir, watermark_image, config)
     else:
-        # 自动检测模式（向后兼容）
+        # Auto-detect mode (backward compatible)
         pdf_files_present = len(get_pdf_files(Path(input_dir))) > 0
         if pdf_files_present:
             success = _process_pdf_files(input_dir, output_dir, watermark_image, config)

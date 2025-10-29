@@ -23,7 +23,7 @@ Use cases: README/architecture (Mermaid), API and code docs, blog archiving, pro
 ### Run the project
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/pinyinjj/Markdown-to-PDF-Tool.git
 cd md-pdf-watermark
 python main.py
 ```
@@ -73,44 +73,44 @@ The program will guide you through the modes:
 
 ### macOS
 
-1. **安装Python**
+1. **Install Python**
    ```bash
-   # 使用Homebrew
+   # Using Homebrew
    brew install python
-   
-   # 或从python.org下载
+
+   # Or download from python.org
    ```
 
-2. **安装依赖**
+2. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    playwright install
    ```
 
-3. **系统依赖**（如果需要）
+3. **System dependencies** (if needed)
    ```bash
    playwright install-deps
    ```
 
 ### Linux
 
-1. **安装Python**
+1. **Install Python**
    ```bash
    # Ubuntu/Debian
    sudo apt update
    sudo apt install python3 python3-pip python3-venv
-   
+
    # CentOS/RHEL
    sudo yum install python3 python3-pip
    ```
 
-2. **安装依赖**
+2. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    playwright install
    ```
 
-3. **系统依赖**
+3. **System dependencies**
    ```bash
    sudo playwright install-deps
    ```
@@ -195,13 +195,13 @@ export WATERMARK_FONT="/path/to/your/font.ttf"
 Modify relevant fields in `WatermarkConfig`:
 
 ```python
-# 调整透明度
+# Adjust opacity
 OPACITY = 0.3
 
-# 调整角度
+# Adjust angle
 ANGLE = 30
 
-# 调整网格密度
+# Adjust grid density
 HORIZONTAL_BOXES = 4
 VERTICAL_BOXES = 8
 ```
