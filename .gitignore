@@ -1,0 +1,60 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Unit test / coverage reports
+.pytest_cache/
+.coverage*
+htmlcov/
+
+# Type checker caches
+.mypy_cache/
+.pytype/
+
+# IDE/editor
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
+*.env
+
+# Playwright (local caches often outside repo, but ignore project-local if any)
+playwright-report/
+playwright/.cache/
+
+# Generated outputs (keep folder, ignore contents)
+output/*
+!output/
+
+# Input folder: keep folder, only track test_cn.md and test_en.md
+input/*
+!input/
+!input/test_cn.md
+!input/test_en.md
+
+# Logs
+*.log
+
+# Misc
+*.swp
+*.swo

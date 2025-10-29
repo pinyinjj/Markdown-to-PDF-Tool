@@ -1,0 +1,14 @@
+# PDF Watermark Tool Dependencies
+# Core dependencies
+
+# Image processing - for generating text watermark images
+Pillow
+
+# Markdown processing - for Markdown to PDF conversion
+markdown
+
+# Browser automation - for Markdown to PDF rendering
+playwright
+
+# PDF watermark processing - for adding watermarks to PDF files
+pdf-watermark
