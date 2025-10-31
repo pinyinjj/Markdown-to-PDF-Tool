@@ -8,7 +8,6 @@ Also supports converting Markdown(.md) files in the input directory to Mermaid-s
 import os
 import subprocess
 import sys
-import argparse
 from pathlib import Path
 from typing import List, Optional
 from datetime import date, datetime
@@ -145,7 +144,10 @@ def get_user_input() -> dict:
         
         # Watermark text
         while True:
-            text = input(t('enter_watermark_text')).strip()
+            red = "\033[31m"
+            reset = "\033[0m"
+            prompt = f"\n{red}{t('enter_watermark_text')}{reset}\n> "
+            text = input(prompt).strip()
             if text == "0":
                 return None  # Return to previous menu
             elif text:
@@ -202,7 +204,7 @@ def get_user_input() -> dict:
     return config
 
 
-def run_watermark_command(args: List[str]) -> tuple[str, str, int]:
+def run_watermark_command(args: List[str]) -> tuple:
     """
     Run watermark CLI command and return results.
     
@@ -416,7 +418,7 @@ def generate_text_watermark_image(text: str, out_path: str, font_size: int = 48,
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path)
-    print("✓ " + t('text_watermark_image_generated', path=out_path, font=font_path))
+    print(t('text_watermark_image_generated', path=out_path, font=font_path))
     return out_path
 
 
@@ -507,9 +509,9 @@ def process_all_pdfs(
         print("✗ " + t('no_pdf_files_in_directory', directory=input_dir))
         return False
 
-    print("✓ " + t('found_pdf_files', count=len(pdf_files)))
-    print(f"✓ {t('watermark_image')}: {watermark_image}")
-    print(f"✓ {t('watermark_type')}: {watermark_type}")
+    print(t('found_pdf_files', count=len(pdf_files)))
+    print(f"{t('watermark_image')}: {watermark_image}")
+    print(f"{t('watermark_type')}: {watermark_type}")
     print("=" * 50)
 
     success_count = 0
@@ -526,7 +528,7 @@ def process_all_pdfs(
             success_count += 1
 
     print("=" * 50)
-    print("✓ " + t('pdf_processing_completed', success=success_count, total=total_count))
+    print(t('pdf_processing_completed', success=success_count, total=total_count))
     if success_count < total_count:
         print("✗ " + t('processing_failed'))
         return False
@@ -675,12 +677,13 @@ def process_all_mds(
         print("✗ " + t('no_md_files_in_directory', directory=input_dir))
         return False
 
-    print("✓ " + t('found_md_files', count=len(md_files)))
+    print(t('found_md_files', count=len(md_files)))
     ok = 0
     for md in md_files:
         out_pdf = output_path / f"{md.stem}.pdf"
         if md_to_pdf_with_mermaid(md, out_pdf):
             # After conversion, add watermark (image watermark only)
+            watermark_success = True
             if watermark_image:
                 # Use user configuration or defaults
                 watermark_type = config.get("watermark_type", WatermarkConfig.WATERMARK_TYPE) if config else WatermarkConfig.WATERMARK_TYPE
@@ -690,7 +693,7 @@ def process_all_mds(
                 opacity = config.get("opacity", WatermarkConfig.OPACITY) if config else WatermarkConfig.OPACITY
                 image_scale = config.get("image_scale", WatermarkConfig.IMAGE_SCALE) if config else WatermarkConfig.IMAGE_SCALE
                 
-                add_watermark_to_file(
+                watermark_success = add_watermark_to_file(
                     input_file=out_pdf,
                     output_file=out_pdf,
                     watermark_image=watermark_image,
@@ -701,9 +704,10 @@ def process_all_mds(
                     opacity=opacity,
                     image_scale=image_scale,
                 )
-            ok += 1
+            if watermark_success:
+                ok += 1
     print("=" * 50)
-    print("✓ " + t('md_conversion_completed', success=ok, total=len(md_files)))
+    print(t('md_conversion_completed', success=ok, total=len(md_files)))
     return ok == len(md_files)
 
 
@@ -788,7 +792,7 @@ def _process_pdf_files(input_dir: str, output_dir: str, watermark_image: str, co
         print(t('install_pdf_watermark_hint'))
         return False
     
-    print("✓ " + t('watermark_cli_available'))
+    print(t('watermark_cli_available'))
     return process_all_pdfs(
         input_dir=input_dir,
         output_dir=output_dir,
@@ -815,7 +819,7 @@ def _process_markdown_files(input_dir: str, output_dir: str, watermark_image: st
     Returns:
         bool: True on success, else False
     """
-    print("✓ " + t('no_pdf_found_processing_md'))
+    print(t('no_pdf_found_processing_md'))
     return process_all_mds(
         input_dir=input_dir,
         output_dir=output_dir,
@@ -836,7 +840,7 @@ def _process_markdown_files_no_watermark(input_dir: str, output_dir: str, config
     Returns:
         bool: True on success, else False
     """
-    print("✓ " + t('start_converting_md_no_watermark'))
+    print(t('start_converting_md_no_watermark'))
     
     # Get Markdown files
     md_files = get_md_files(Path(input_dir))
@@ -853,7 +857,6 @@ def _process_markdown_files_no_watermark(input_dir: str, output_dir: str, config
             pdf_path = Path(output_dir) / f"{md_file.stem}.pdf"
             success = md_to_pdf_with_mermaid(md_file, pdf_path)
             if success:
-                print("✓ " + t('conversion_successful', input_file=md_file.name, output_file=pdf_path.name))
                 success_count += 1
             else:
                 print("✗ " + t('conversion_failed', file=md_file.name))
@@ -864,7 +867,7 @@ def _process_markdown_files_no_watermark(input_dir: str, output_dir: str, config
         print("✗ " + t('no_md_files_converted'))
         return False
 
-    print("✓ " + t('md_conversion_completed', success=success_count, total=len(md_files)))
+    print(t('md_conversion_completed', success=success_count, total=len(md_files)))
     return True
 
 
@@ -951,8 +954,8 @@ def main():
             print("✗ " + t('watermark_image_not_found'))
             return 1
         
-        print(f"✓ {t('watermark_image_generated')} {watermark_image}")
-        print("✓ " + t('watermark_generation_completed'))
+        print(f"{t('watermark_image_generated')} {watermark_image}")
+        print(t('watermark_generation_completed'))
         return 0
     
     # If no-watermark mode
@@ -980,11 +983,11 @@ def main():
     print()
     print("=" * 50)
     print(t('start_processing_files'))
-    print(f"✓ {t('watermark_type')}: {config.get('watermark_type', WatermarkConfig.WATERMARK_TYPE)}")
+    print(f"{t('watermark_type')}: {config.get('watermark_type', WatermarkConfig.WATERMARK_TYPE)}")
     if config.get("verbose", False):
-        print(f"✓ {t('input_directory')}: {input_dir}")
-        print(f"✓ {t('output_directory')}: {output_dir}")
-        print(f"✓ {t('watermark_image')}: {watermark_image}")
+        print(f"{t('input_directory')}: {input_dir}")
+        print(f"{t('output_directory')}: {output_dir}")
+        print(f"{t('watermark_image')}: {watermark_image}")
 
     # Choose processing method by mode
     if config.get("mode") == "pdf":
