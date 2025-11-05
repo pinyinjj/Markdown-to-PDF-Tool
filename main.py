@@ -298,7 +298,7 @@ img {{ max-width: 100%; }}
 <script>
 (function() {{
   const mdSrc = {md_source_js};
-  const md = window.markdownit({{ html: true, linkify: true, typographer: true }});
+  const md = window.markdownit({{ html: true, linkify: true, typographer: true, breaks: true }});
   const html = md.render(mdSrc);
   const root = document.getElementById('md-root');
   root.innerHTML = html;
