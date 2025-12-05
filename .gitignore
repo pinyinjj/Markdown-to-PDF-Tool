@@ -58,3 +58,6 @@ input/*
 # Misc
 *.swp
 *.swo
+
+# Generated watermark images
+watermarks/

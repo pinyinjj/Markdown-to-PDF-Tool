@@ -261,15 +261,20 @@ def md_to_pdf_with_mermaid(md_path: Path, out_pdf: Path) -> bool:
     md_text = md_path.read_text(encoding="utf-8")
     md_source_js = json.dumps(md_text)
 
+    # Base directory (as file:// URI) for resolving relative paths in JS (images, local links)
+    base_href = md_path.parent.resolve().as_uri() + "/"
+
     html = f"""
 <!doctype html>
 <html>
 <head>
-<meta charset=\"utf-8\"> 
+<meta charset=\"utf-8\">
 <title>{md_path.stem}</title>
 <link rel=\"preconnect\" href=\"https://cdnjs.cloudflare.com\">
 <link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown.min.css\">
 <link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css\">
+<!-- KaTeX for LaTeX math rendering -->
+<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css\">
 <style>
 @page {{ size: A4; margin: 18mm; }}
 body {{
@@ -286,22 +291,110 @@ img {{ max-width: 100%; }}
 .markdown-body ul ul {{ list-style-type: circle; }}
 .markdown-body ul ul ul {{ list-style-type: square; }}
 .markdown-body ol {{ padding-left: 2em; }}
+/* KaTeX math rendering styles */
+.katex {{ font-size: 1.1em; }}
+.katex-display {{ margin: 1em 0; }}
 </style>
 <script src=\"https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js\"></script>
 <script src=\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js\"></script>
 <!-- markdown-it (same family as VSCode markdown-preview-enhanced) -->
 <script src=\"https://cdn.jsdelivr.net/npm/markdown-it@14/dist/markdown-it.min.js\"></script>
+<!-- KaTeX for rendering LaTeX math expressions -->
+<script src=\"https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js\"></script>
+<script src=\"https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js\"></script>
 <script>mermaid.initialize({{ startOnLoad: false, securityLevel: 'loose' }});</script>
 </head>
 <body>
 <article class=\"markdown-body\" id=\"md-root\"></article>
 <script>
+// Expose base path for fixing local links (used below)
+window.__MD_BASE_HREF__ = {json.dumps(base_href)};
+</script>
+<script>
 (function() {{
   const mdSrc = {md_source_js};
+  // Pre-process: replace math expressions with HTML comments as placeholders
+  // This prevents markdown-it from processing them
+  const mathData = [];
+  let processedMd = mdSrc;
+  
+  // Handle display math $$...$$ first (must be processed before inline $)
+  processedMd = processedMd.replace(/\\$\\$([\\s\\S]*?)\\$\\$/g, (match, content) => {{
+    const id = mathData.length;
+    mathData.push({{ type: 'display', content: content.trim() }});
+    return `<!--MATH_DISPLAY_${{id}}-->`;
+  }});
+  
+  // Handle inline math $...$ (avoid matching $$ by checking it's not preceded or followed by $)
+  // Use a function to check context since lookbehind may not be supported
+  processedMd = processedMd.replace(/\\$([^$\\n]+?)\\$/g, (match, content, offset, string) => {{
+    // Check if this is actually part of a $$...$$ (already processed)
+    if (string.substring(Math.max(0, offset - 1), offset) === '$' || 
+        string.substring(offset + match.length, offset + match.length + 1) === '$') {{
+      return match; // Skip, it's part of display math
+    }}
+    // Check if it's inside a comment placeholder (already processed)
+    const before = string.substring(Math.max(0, offset - 50), offset);
+    const after = string.substring(offset + match.length, offset + match.length + 50);
+    if (before.includes('<!--MATH_') || after.includes('<!--MATH_')) {{
+      return match; // Skip
+    }}
+    const id = mathData.length;
+    mathData.push({{ type: 'inline', content: content.trim() }});
+    return `<!--MATH_INLINE_${{id}}-->`;
+  }});
+  
   const md = window.markdownit({{ html: true, linkify: true, typographer: true, breaks: true }});
-  const html = md.render(mdSrc);
+  let html = md.render(processedMd);
+  
+  // Replace HTML comment placeholders with actual math elements
+  mathData.forEach((math, index) => {{
+    const displayComment = `<!--MATH_DISPLAY_${{index}}-->`;
+    const inlineComment = `<!--MATH_INLINE_${{index}}-->`;
+    const comment = math.type === 'display' ? displayComment : inlineComment;
+    
+    if (html.includes(comment)) {{
+      const tag = math.type === 'display' ? 'div' : 'span';
+      const className = math.type === 'display' ? 'katex-display' : 'math-inline';
+      const mathElement = `<${{tag}} class="${{className}}" data-math-content="${{math.content.replace(/"/g, '&quot;')}}">${{math.content}}</${{tag}}>`;
+      html = html.replace(comment, mathElement);
+    }}
+  }});
+  
   const root = document.getElementById('md-root');
   root.innerHTML = html;
+
+  // Normalize local image sources and links to absolute file:// URLs based on the markdown file directory
+  try {{
+    const base = window.__MD_BASE_HREF__;
+    if (base) {{
+      // Fix <img src="..."> so that ./xxx.png 指向 markdown 所在目录，而不是输出 html 所在目录
+      const imgs = root.querySelectorAll('img[src]');
+      imgs.forEach(img => {{
+        const src = img.getAttribute('src');
+        if (!src) return;
+        // Skip absolute/remote/data URLs
+        if (/^(https?:|data:|ftp:)/i.test(src)) return;
+        try {{
+          const u = new URL(src, base);
+          img.setAttribute('src', u.href);
+        }} catch (e) {{}}
+      }});
+
+      // Fix <a href="..."> for local files (.ulg 等)
+      const anchors = root.querySelectorAll('a[href]');
+      anchors.forEach(a => {{
+        const href = a.getAttribute('href');
+        if (!href) return;
+        // Only rewrite relative links, skip http(s), mailto etc.
+        if (/^(https?:|mailto:|tel:|ftp:)/i.test(href)) return;
+        try {{
+          const u = new URL(href, base);
+          a.setAttribute('href', u.href);
+        }} catch (e) {{}}
+      }});
+    }}
+  }} catch (e) {{}}
   // Convert mermaid code blocks
   const blocks = Array.from(root.querySelectorAll('code.language-mermaid, pre code.language-mermaid'));
   blocks.forEach((code) => {{
@@ -312,6 +405,46 @@ img {{ max-width: 100%; }}
     parent.replaceWith(container);
   }});
   try {{ window.hljs?.highlightAll(); }} catch (e) {{}}
+  // Render math expressions with KaTeX
+  try {{
+    if (window.katex) {{
+      // Render inline math (span.math-inline elements)
+      root.querySelectorAll('span.math-inline').forEach(span => {{
+        const mathContent = span.getAttribute('data-math-content') || span.textContent || '';
+        if (mathContent && !span.querySelector('.katex')) {{
+          try {{
+            window.katex.render(mathContent.trim(), span, {{ throwOnError: false, displayMode: false }});
+          }} catch (e) {{
+            console.warn('KaTeX inline math error:', e, mathContent);
+          }}
+        }}
+      }});
+      // Render display math (div.katex-display elements)
+      root.querySelectorAll('div.katex-display').forEach(div => {{
+        const mathContent = div.getAttribute('data-math-content') || div.textContent || '';
+        if (mathContent && !div.querySelector('.katex')) {{
+          try {{
+            window.katex.render(mathContent.trim(), div, {{ throwOnError: false, displayMode: true }});
+          }} catch (e) {{
+            console.warn('KaTeX display math error:', e, mathContent);
+          }}
+        }}
+      }});
+    }}
+    // Also use auto-render as fallback for any remaining math expressions
+    if (window.renderMathInElement) {{
+      window.renderMathInElement(root, {{
+        delimiters: [
+          {{left: '$$', right: '$$', display: true}},
+          {{left: '$', right: '$', display: false}},
+          {{left: '\\\\[', right: '\\\\]', display: true}},
+          {{left: '\\\\(', right: '\\\\)', display: false}}
+        ],
+        throwOnError: false,
+        strict: false
+      }});
+    }}
+  }} catch (e) {{ console.error('KaTeX rendering error:', e); }}
   setTimeout(() => window.mermaid?.init(), 50);
 }})();
 </script>
@@ -320,12 +453,18 @@ img {{ max-width: 100%; }}
 """
  
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
- 
+
+    # Write HTML to a temporary file and open it via file:// URL so that Chromium
+    # is allowed to load local images referenced by relative paths.
+    tmp_html_path = out_pdf.with_suffix(".html")
+    tmp_html_path.write_text(html, encoding="utf-8")
+
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch()
+            # Allow Chromium to load local file:// resources (images, etc.)
+            browser = p.chromium.launch(args=["--allow-file-access-from-files"])
             page = browser.new_page()
-            page.set_content(html, wait_until="networkidle")
+            page.goto(tmp_html_path.resolve().as_uri(), wait_until="networkidle")
             try:
                 # Wait until markdown-it rendering produced list items and (if present) mermaid completed
                 page.wait_for_function("document.querySelectorAll('#md-root li').length > 0", timeout=5000)
@@ -341,6 +480,13 @@ img {{ max-width: 100%; }}
     except Exception as e:
         print("✗ " + t('conversion_failed_with_error', file=md_path.name, error=str(e)))
         return False
+    finally:
+        try:
+            if tmp_html_path.exists():
+                tmp_html_path.unlink()
+        except Exception:
+            # Best-effort cleanup only
+            pass
 
 
 def process_all_mds(
@@ -528,52 +674,108 @@ def _obtain_config_from_cli_and_env() -> dict:
     return _build_default_config()
 
 
+def _cleanup_generated_watermark(watermark_image: Optional[str], config: dict) -> None:
+    """
+    Clean up generated watermark image file after processing.
+    Only deletes files in the watermarks/ directory that were generated from text.
+    Does not delete user-provided image watermarks.
+    
+    Args:
+        watermark_image: Path to the watermark image file
+        config: User configuration dictionary
+    """
+    if not watermark_image:
+        return
+    
+    watermark_path = Path(watermark_image)
+    
+    # Only delete if:
+    # 1. The file exists
+    # 2. It's in the watermarks/ directory
+    # 3. It was generated from text (not a user-provided image)
+    if watermark_path.exists() and watermark_path.parent.name == "watermarks":
+        # Check if this is a generated text watermark (not user-provided image)
+        if config.get("type") == "text" or (config.get("type") != "image" and not config.get("image")):
+            try:
+                watermark_path.unlink()
+                print(f"✓ Cleaned up generated watermark: {watermark_image}")
+            except Exception as e:
+                print(f"⚠ Warning: Failed to delete watermark file {watermark_image}: {e}")
+
+
 def _dispatch_by_mode(config: dict) -> int:
     """Process files according to selected mode."""
-    if config.get("mode") == "watermark_only":
-        print()
-        print("=" * 50)
-        print(t('start_generating_watermark'))
+    watermark_image: Optional[str] = None
+    is_watermark_only_mode = config.get("mode") == "watermark_only"
+    
+    try:
+        if is_watermark_only_mode:
+            print()
+            print("=" * 50)
+            print(t('start_generating_watermark'))
+            watermark_image = _setup_watermark_image(config)
+            if not watermark_image:
+                print("✗ " + t('watermark_image_not_found'))
+                return 1
+            print(f"{t('watermark_image_generated')} {watermark_image}")
+            print(t('watermark_generation_completed'))
+            # Don't clean up in watermark_only mode - user wants to keep it
+            return 0
+
+        if config.get("mode") == "markdown_no_watermark":
+            print()
+            print("=" * 50)
+            print(t('start_converting_md_no_watermark'))
+            return 0 if _process_markdown_files_no_watermark(config["input_dir"], config["output_dir"], config) else 1
+
+        input_dir = config["input_dir"]
+        output_dir = config["output_dir"]
+
         watermark_image = _setup_watermark_image(config)
         if not watermark_image:
             print("✗ " + t('watermark_image_not_found'))
             return 1
-        print(f"{t('watermark_image_generated')} {watermark_image}")
-        print(t('watermark_generation_completed'))
-        return 0
 
-    if config.get("mode") == "markdown_no_watermark":
         print()
         print("=" * 50)
-        print(t('start_converting_md_no_watermark'))
-        return 0 if _process_markdown_files_no_watermark(config["input_dir"], config["output_dir"], config) else 1
+        print(t('start_processing_files'))
+        print(f"{t('watermark_type')}: {config.get('watermark_type', WatermarkConfig.WATERMARK_TYPE)}")
+        if config.get("verbose", False):
+            print(f"{t('input_directory')}: {input_dir}")
+            print(f"{t('output_directory')}: {output_dir}")
+            print(f"{t('watermark_image')}: {watermark_image}")
 
-    input_dir = config["input_dir"]
-    output_dir = config["output_dir"]
+        if config.get("mode") == "pdf":
+            pdf_files_present = len(get_pdf_files(Path(input_dir))) > 0
+            if pdf_files_present:
+                success = _process_pdf_files(input_dir, output_dir, watermark_image, config)
+            else:
+                # No PDF files found, automatically fallback to Markdown processing
+                md_files_present = len(get_md_files(Path(input_dir))) > 0
+                if md_files_present:
+                    print(t('no_pdf_found_processing_md'))
+                    success = _process_markdown_files(input_dir, output_dir, watermark_image, config)
+                else:
+                    print("✗ " + t('no_pdf_files_in_directory', directory=input_dir))
+                    print("✗ " + t('no_md_files_in_directory', directory=input_dir))
+                    success = False
+        elif config.get("mode") == "markdown":
+            success = _process_markdown_files(input_dir, output_dir, watermark_image, config)
+        else:
+            pdf_files_present = len(get_pdf_files(Path(input_dir))) > 0
+            success = _process_pdf_files(input_dir, output_dir, watermark_image, config) if pdf_files_present else _process_markdown_files(input_dir, output_dir, watermark_image, config)
 
-    watermark_image = _setup_watermark_image(config)
-    if not watermark_image:
-        print("✗ " + t('watermark_image_not_found'))
+        # Clean up generated watermark after processing (except in watermark_only mode)
+        if watermark_image and not is_watermark_only_mode:
+            _cleanup_generated_watermark(watermark_image, config)
+        
+        return 0 if success else 1
+    except Exception as e:
+        # Ensure cleanup even if there's an error (except in watermark_only mode)
+        if watermark_image and not is_watermark_only_mode:
+            _cleanup_generated_watermark(watermark_image, config)
+        print(f"✗ Error during processing: {e}")
         return 1
-
-    print()
-    print("=" * 50)
-    print(t('start_processing_files'))
-    print(f"{t('watermark_type')}: {config.get('watermark_type', WatermarkConfig.WATERMARK_TYPE)}")
-    if config.get("verbose", False):
-        print(f"{t('input_directory')}: {input_dir}")
-        print(f"{t('output_directory')}: {output_dir}")
-        print(f"{t('watermark_image')}: {watermark_image}")
-
-    if config.get("mode") == "pdf":
-        success = _process_pdf_files(input_dir, output_dir, watermark_image, config)
-    elif config.get("mode") == "markdown":
-        success = _process_markdown_files(input_dir, output_dir, watermark_image, config)
-    else:
-        pdf_files_present = len(get_pdf_files(Path(input_dir))) > 0
-        success = _process_pdf_files(input_dir, output_dir, watermark_image, config) if pdf_files_present else _process_markdown_files(input_dir, output_dir, watermark_image, config)
-
-    return 0 if success else 1
 
 
 def main():
