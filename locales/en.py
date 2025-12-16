@@ -79,16 +79,14 @@ EN: dict = {
     'padding': 'Padding',
     'watermark_layout': 'Watermark layout',
     'opacity': 'Opacity',
-    'rotation_angle': 'Rotation angle',
-    'image_scale': 'Image scale',
+    'angle': 'Angle',
     'horizontal_boxes': 'Horizontal boxes',
     'vertical_boxes': 'Vertical boxes',
-    'input_dir': 'Input directory',
-    'output_dir': 'Output directory',
-    'verbose_output': 'Verbose output',
-    'default': 'Default',
-    'yes': 'Yes',
-    'no': 'No',
+
+    # CLI / misc
+    'language_set_to': 'Language set to: {lang}',
+
+    # Web UI specific
+    'filter_docsy_front_matter': 'Filter Docsy front matter',
+    'rename_pdf_by_h1_title': 'Rename PDF by H1 title (# Title)',
 }
-
-

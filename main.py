@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import date, datetime
 import json
+import re
 
 # Import internationalization support
 from i18n import t, i18n
@@ -170,6 +171,7 @@ def process_all_pdfs(
     output_dir: str = "output",
     watermark_image: str = None,
     watermark_type: str = "grid",
+    files: Optional[List[Path]] = None,
     **kwargs
 ) -> bool:
     """
@@ -192,7 +194,9 @@ def process_all_pdfs(
         return False
     output_path.mkdir(parents=True, exist_ok=True)
 
-    pdf_files = get_pdf_files(input_path)
+    # If a specific file list is provided, only process those files.
+    # Otherwise, process all PDF files in the input directory.
+    pdf_files = sorted(files) if files is not None else get_pdf_files(input_path)
     if not pdf_files:
         print("✗ " + t('no_pdf_files_in_directory', directory=input_dir))
         return False
@@ -225,6 +229,152 @@ def process_all_pdfs(
 
 # ========= New: Markdown -> PDF (Mermaid supported) =========
 
+def remove_docsy_front_matter(md_text: str) -> str:
+    """
+    Remove docsy front matter (YAML front matter between --- markers) from Markdown text.
+    If the document doesn't have a level-1 heading (#), extract title from front matter
+    and add it as a level-1 heading.
+    
+    Args:
+        md_text: Original Markdown text
+        
+    Returns:
+        str: Markdown text with front matter removed and title added if needed
+    """
+    lines = md_text.split('\n')
+    
+    if not lines:
+        return md_text
+
+    # Find the first and second Docsy front matter delimiters:
+    # a line that consists of --- followed only by optional whitespace.
+    start_index = -1
+    end_index = -1
+    for i, line in enumerate(lines):
+        if line.strip() == '---':
+            start_index = i
+            break
+    
+    # No opening delimiter found -> nothing to do
+    if start_index == -1:
+        return md_text
+    
+    for i in range(start_index + 1, len(lines)):
+        if lines[i].strip() == '---':
+            end_index = i
+            break
+    
+    # If no closing --- found, return original text (invalid / incomplete front matter)
+    if end_index == -1:
+        return md_text
+    
+    # Extract front matter content (between first --- and second ---)
+    front_matter_lines = lines[start_index + 1:end_index]
+    front_matter_text = '\n'.join(front_matter_lines)
+    
+    # Extract title from front matter:
+    # We only trust the string inside the first pair of double quotes after `title:`
+    title = None
+    # NOTE: this is a real regex; \s means whitespace
+    title_pattern = re.compile(r'^title\s*:\s*"(.*?)"\s*$')
+    for line in front_matter_lines:
+        m = title_pattern.match(line.strip())
+        if m:
+            title = m.group(1)
+            break
+    
+    # Get content without front matter (keep any content before the first ---)
+    content_lines = lines[:start_index] + lines[end_index + 1:]
+    content_text = '\n'.join(content_lines)
+    
+    # Check if document has a level-1 heading (#)
+    # Skip code blocks to avoid matching code comments
+    has_h1 = False
+    in_code_block = False
+    for line in content_lines:
+        stripped = line.strip()
+        
+        # Check for code block markers
+        if stripped.startswith('```'):
+            in_code_block = not in_code_block
+            continue
+        
+        # Skip lines inside code blocks
+        if in_code_block:
+            continue
+        
+        # Check for # heading (must be at start of line or after whitespace)
+        if stripped.startswith('# ') and not stripped.startswith('##'):
+            has_h1 = True
+            break
+    
+    # If no H1 found and we have a title, add it as H1
+    if not has_h1 and title:
+        # Add title as level-1 heading at the beginning of content
+        if content_text.strip():
+            return f'# {title}\n\n{content_text}'
+        else:
+            return f'# {title}\n'
+    
+    # Return content without front matter (title already exists or no title found)
+    return content_text
+
+
+def extract_h1_title(md_path: Path) -> Optional[str]:
+    """
+    Extract the first level-1 heading (# Title) from a Markdown file.
+    Skips code blocks to avoid matching code comments.
+    
+    Args:
+        md_path: Path to the Markdown file
+        
+    Returns:
+        Optional[str]: The title text (without #), or None if not found
+    """
+    try:
+        # Read original content
+        content = md_path.read_text(encoding="utf-8")
+        # Apply the same Docsy front matter removal + title injection logic,
+        # so that we see the synthetic H1 when there is only a Docsy title.
+        processed = remove_docsy_front_matter(content)
+        lines = processed.split('\n')
+        
+        # Track if we're inside a code block (```...```)
+        in_code_block = False
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Check for code block markers
+            if stripped.startswith('```'):
+                in_code_block = not in_code_block
+                continue
+            
+            # Skip lines inside code blocks
+            if in_code_block:
+                continue
+            
+            # Check for # heading (must be exactly #, not ##)
+            # Also ensure it's at the start of the line (not indented code)
+            if stripped.startswith('# ') and not stripped.startswith('##'):
+                # Extract title: remove # and leading/trailing whitespace
+                title = stripped[1:].strip()
+                # Sanitize filename: remove invalid characters
+                # Replace common invalid chars with underscore or remove
+                invalid_chars = '<>:"/\\|?*'
+                for char in invalid_chars:
+                    title = title.replace(char, '_')
+                # Remove leading/trailing dots and spaces
+                title = title.strip('. ')
+                # Limit length to avoid filesystem issues
+                if len(title) > 200:
+                    title = title[:200]
+                return title if title else None
+    except Exception:
+        pass
+    return None
+
+
 def get_md_files(input_dir: Path) -> List[Path]:
     """
     Get all Markdown files in the input directory.
@@ -241,13 +391,14 @@ def get_md_files(input_dir: Path) -> List[Path]:
     return sorted(md_files)
 
 
-def md_to_pdf_with_mermaid(md_path: Path, out_pdf: Path) -> bool:
+def md_to_pdf_with_mermaid(md_path: Path, out_pdf: Path, filter_front_matter: bool = False) -> bool:
     """
     Convert Markdown to a Mermaid-supported PDF using Playwright.
     
     Args:
         md_path: Input Markdown file path
         out_pdf: Output PDF file path
+        filter_front_matter: If True, remove docsy front matter (YAML between --- markers)
         
     Returns:
         bool: True if succeeded, False otherwise
@@ -259,6 +410,11 @@ def md_to_pdf_with_mermaid(md_path: Path, out_pdf: Path) -> bool:
         return False
     # Read raw Markdown source; we'll render with markdown-it in the browser to match VSCode markdown-preview-enhanced
     md_text = md_path.read_text(encoding="utf-8")
+    
+    # Remove front matter if requested
+    if filter_front_matter:
+        md_text = remove_docsy_front_matter(md_text)
+    
     md_source_js = json.dumps(md_text)
 
     # Base directory (as file:// URI) for resolving relative paths in JS (images, local links)
@@ -494,6 +650,7 @@ def process_all_mds(
     output_dir: str = "output",
     watermark_image: Optional[str] = None,
     config: Optional[dict] = None,
+    files: Optional[List[Path]] = None,
 ) -> bool:
     """
     Process all Markdown files, convert to PDF, and add watermark.
@@ -514,16 +671,22 @@ def process_all_mds(
         return False
     output_path.mkdir(parents=True, exist_ok=True)
 
-    md_files = get_md_files(input_path)
+    # If a specific file list is provided, only process those files.
+    # Otherwise, process all Markdown files in the input directory.
+    md_files = sorted(files) if files is not None else get_md_files(input_path)
     if not md_files:
         print("✗ " + t('no_md_files_in_directory', directory=input_dir))
         return False
 
     print(t('found_md_files', count=len(md_files)))
     ok = 0
+    # Get filter_front_matter setting from config
+    filter_front_matter = config.get("filter_front_matter", False) if config else False
+    rename_by_title = config.get("rename_by_title", False) if config else False
+    
     for md in md_files:
         out_pdf = output_path / f"{md.stem}.pdf"
-        if md_to_pdf_with_mermaid(md, out_pdf):
+        if md_to_pdf_with_mermaid(md, out_pdf, filter_front_matter=filter_front_matter):
             # After conversion, add watermark (image watermark only)
             watermark_success = True
             if watermark_image:
@@ -546,6 +709,24 @@ def process_all_mds(
                     opacity=opacity,
                     image_scale=image_scale,
                 )
+            
+            # Rename PDF based on H1 title if requested (after watermark is added)
+            if watermark_success and rename_by_title:
+                h1_title = extract_h1_title(md)
+                if h1_title:
+                    new_pdf_path = output_path / f"{h1_title}.pdf"
+                    try:
+                        # If target file exists, add a number suffix
+                        if new_pdf_path.exists():
+                            counter = 1
+                            while new_pdf_path.exists():
+                                new_pdf_path = output_path / f"{h1_title}_{counter}.pdf"
+                                counter += 1
+                        out_pdf.rename(new_pdf_path)
+                        print(f"✓ Renamed PDF: {out_pdf.name} -> {new_pdf_path.name}")
+                    except Exception as e:
+                        print(f"⚠ Failed to rename PDF: {e}")
+            
             if watermark_success:
                 ok += 1
     print("=" * 50)
@@ -556,7 +737,13 @@ def process_all_mds(
 # watermark image setup moved to watermark.image_setup
 
 
-def _process_pdf_files(input_dir: str, output_dir: str, watermark_image: str, config: dict) -> bool:
+def _process_pdf_files(
+    input_dir: str,
+    output_dir: str,
+    watermark_image: str,
+    config: dict,
+    files: Optional[List[Path]] = None,
+) -> bool:
     """
     Process PDF files and add watermark.
     
@@ -580,6 +767,7 @@ def _process_pdf_files(input_dir: str, output_dir: str, watermark_image: str, co
         output_dir=output_dir,
         watermark_image=watermark_image,
         watermark_type=config.get("watermark_type", WatermarkConfig.WATERMARK_TYPE),
+        files=files,
         horizontal_boxes=config.get("horizontal_boxes", WatermarkConfig.HORIZONTAL_BOXES),
         vertical_boxes=config.get("vertical_boxes", WatermarkConfig.VERTICAL_BOXES),
         angle=config.get("angle", WatermarkConfig.ANGLE),
@@ -588,7 +776,13 @@ def _process_pdf_files(input_dir: str, output_dir: str, watermark_image: str, co
     )
 
 
-def _process_markdown_files(input_dir: str, output_dir: str, watermark_image: str, config: dict) -> bool:
+def _process_markdown_files(
+    input_dir: str,
+    output_dir: str,
+    watermark_image: str,
+    config: dict,
+    files: Optional[List[Path]] = None,
+) -> bool:
     """
     Convert Markdown files to PDF and add watermark.
     
@@ -607,15 +801,27 @@ def _process_markdown_files(input_dir: str, output_dir: str, watermark_image: st
         output_dir=output_dir,
         watermark_image=watermark_image,
         config=config,
+        files=files,
     )
 
 
-def _process_markdown_files_no_watermark(input_dir: str, output_dir: str, config: dict) -> bool:
+def _process_markdown_files_no_watermark(
+    input_dir: str,
+    output_dir: str,
+    config: dict,
+    files: Optional[List[Path]] = None,
+) -> bool:
     """
     Convert Markdown files to PDF (no watermark).
     """
     print(t('start_converting_md_no_watermark'))
-    return process_all_mds(input_dir=input_dir, output_dir=output_dir, watermark_image=None, config=config)
+    return process_all_mds(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        watermark_image=None,
+        config=config,
+        files=files,
+    )
 
 
 def _build_default_config() -> dict:
@@ -645,6 +851,24 @@ def _obtain_config_from_cli_and_env() -> dict:
     """Unify config acquisition based on CLI args and TTY."""
     if len(sys.argv) > 1:
         arg = sys.argv[1]
+        if arg == "--web":
+            # Start web UI - redirect to start_webui.py for proper execution
+            try:
+                import subprocess
+                port = 8080
+                if len(sys.argv) > 2:
+                    try:
+                        port = int(sys.argv[2])
+                    except ValueError:
+                        pass
+                # Use start_webui.py for proper NiceGUI execution
+                script_path = Path(__file__).parent / "start_webui.py"
+                subprocess.run([sys.executable, str(script_path), "--port", str(port)])
+                return {}  # Web UI doesn't return config
+            except Exception as e:
+                print(f"✗ Failed to start web UI: {e}")
+                print("Please use: python start_webui.py")
+                sys.exit(1)
         if arg == "--interactive":
             while True:
                 cfg = get_user_input()
@@ -661,7 +885,7 @@ def _obtain_config_from_cli_and_env() -> dict:
             print(t('detected_non_interactive'))
             print(t('hint_interactive_mode'))
             return _build_default_config()
-        print("Usage: python main.py [--interactive] [--lang en|zh]")
+        print("Usage: python main.py [--interactive] [--web [port]] [--lang en|zh]")
         sys.exit(1)
 
     if sys.stdin.isatty():
@@ -781,6 +1005,9 @@ def _dispatch_by_mode(config: dict) -> int:
 def main():
     """Main function with simplified structure: acquire config, then dispatch by mode."""
     config = _obtain_config_from_cli_and_env()
+    # If config is empty, it means web UI was started (which doesn't return)
+    if not config:
+        return 0
     return _dispatch_by_mode(config)
 
 

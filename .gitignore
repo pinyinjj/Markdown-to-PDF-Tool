@@ -61,3 +61,6 @@ input/*
 
 # Generated watermark images
 watermarks/
+
+# Temporary uploads for web UI
+temp_uploads/

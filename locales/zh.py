@@ -79,16 +79,14 @@ ZH: dict = {
     'padding': '内边距',
     'watermark_layout': '水印布局',
     'opacity': '透明度',
-    'rotation_angle': '旋转角度',
-    'image_scale': '图片缩放',
+    'angle': '角度',
     'horizontal_boxes': '水平网格数',
     'vertical_boxes': '垂直网格数',
-    'input_dir': '输入目录',
-    'output_dir': '输出目录',
-    'verbose_output': '详细输出',
-    'default': '默认',
-    'yes': '是',
-    'no': '否',
+
+    # CLI / 其他
+    'language_set_to': '语言已设置为: {lang}',
+
+    # Web UI 专用
+    'filter_docsy_front_matter': '过滤 Docsy 文档头文件（删除 --- 之间的内容）',
+    'rename_pdf_by_h1_title': '根据一级标题重命名PDF（# 标题）',
 }
-
-
