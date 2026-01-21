@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  md-pdf-watermark:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: md-pdf-watermark
+    ports:
+      - "8080:8080"
+    volumes:
+      # 挂载输入目录（可选，如果需要持久化输入文件）
+      - ./input:/app/input
+      # 挂载输出目录（持久化输出文件）
+      - ./output:/app/output
+      # 挂载临时上传目录
+      - ./temp_uploads:/app/temp_uploads
+      # 挂载水印目录（持久化生成的水印）
+      - ./watermarks:/app/watermarks
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

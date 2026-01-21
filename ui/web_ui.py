@@ -11,15 +11,43 @@ from nicegui.events import UploadEventArguments
 
 from i18n import t, i18n
 from config import WatermarkConfig
-from main import (
-    _setup_watermark_image,
-    _process_pdf_files,
-    _process_markdown_files,
-    _process_markdown_files_no_watermark,
+from core import (
+    setup_watermark_image,
+    process_pdf_files,
+    process_markdown_files,
     get_pdf_files,
-    get_md_files,
-    _cleanup_generated_watermark,
+    get_markdown_files,
+    check_watermark_tool,
 )
+
+
+def cleanup_generated_watermark(watermark_image: Optional[str], config: dict) -> None:
+    """
+    Clean up generated watermark image file after processing.
+    Only deletes files in the watermarks/ directory that were generated from text.
+    Does not delete user-provided image watermarks.
+    
+    Args:
+        watermark_image: Path to the watermark image file
+        config: User configuration dictionary
+    """
+    if not watermark_image:
+        return
+    
+    watermark_path = Path(watermark_image)
+    
+    # Only delete if:
+    # 1. The file exists
+    # 2. It's in the watermarks/ directory
+    # 3. It was generated from text (not a user-provided image)
+    if watermark_path.exists() and watermark_path.parent.name == "watermarks":
+        # Check if this is a generated text watermark (not user-provided image)
+        if config.get("type") == "text" or (config.get("type") != "image" and not config.get("image")):
+            try:
+                watermark_path.unlink()
+                print(f"✓ Cleaned up generated watermark: {watermark_image}")
+            except Exception as e:
+                print(f"⚠ Warning: Failed to delete watermark file {watermark_image}: {e}")
 
 
 class WebUI:
@@ -31,8 +59,14 @@ class WebUI:
         self.watermark_image_path: Optional[str] = None
         self.processing_status = ""
         self.current_language = i18n.get_current_language()
-        # Per-file progress bars: filename -> progress bar
-        self.file_progress_bars: Dict[str, "ui.linear_progress"] = {}
+        # Whether a processing job is currently running
+        self.is_processing: bool = False
+        # Track processed output files for download
+        self.processed_files: List[Path] = []
+        # File list container
+        self.file_list_container: Optional[ui.column] = None
+        # Header clear button for file output section
+        self.clear_files_button: Optional[ui.button] = None
         # Ensure temp_uploads directory exists and is initially clean
         temp_dir = Path('temp_uploads')
         temp_dir.mkdir(exist_ok=True)
@@ -49,20 +83,98 @@ class WebUI:
         # Set page title
         ui.page_title(t('app_title'))
         
-        # Language switcher
-        with ui.row().classes('w-full justify-end p-2'):
-            ui.button('English', on_click=lambda: self.switch_language('en')).classes('text-xs')
-            ui.button('中文', on_click=lambda: self.switch_language('zh')).classes('text-xs')
+        # Add custom CSS for modern layout
+        ui.add_head_html('''
+            <style>
+                .main-container {
+                    max-width: 1000px;
+                    margin: 0 auto;
+                    padding: 0.5rem 0.75rem;
+                }
+                .three-column-grid {
+                    display: grid !important;
+                    grid-template-columns: 1fr 1fr 1fr !important;
+                    grid-template-rows: 320px 320px !important;
+                    gap: 0.75rem !important;
+                    width: 100% !important;
+                }
+                .row-span-2 {
+                    grid-row: 1 / 3 !important;
+                    grid-column: 3 !important;
+                    height: calc(320px + 0.75rem + 320px) !important;
+                }
+                .col-span-2 {
+                    grid-column: 1 / 3 !important;
+                    grid-row: 2 !important;
+                }
+                @media (max-width: 1024px) {
+                    .three-column-grid {
+                        grid-template-columns: 1fr;
+                    }
+                }
+                .card-compact {
+                    padding: 0.75rem;
+                    min-height: 320px;
+                    height: 320px;
+                    display: flex;
+                    flex-direction: column;
+                }
+                .section-title {
+                    font-size: 1rem;
+                    font-weight: 600;
+                    margin-bottom: 0.75rem;
+                    color: #374151;
+                }
+                .fixed-card {
+                    width: 100%;
+                    min-height: 320px;
+                    height: 320px;
+                }
+                .watermark-card-flexible {
+                    width: 100%;
+                    min-height: 320px;
+                    height: 320px;
+                    min-width: 0;
+                    flex: 1 1 auto;
+                }
+                .file-selection-tall {
+                    height: calc(320px + 0.75rem + 320px) !important;
+                    min-height: calc(320px + 0.75rem + 320px) !important;
+                }
+                .markdown-options-container {
+                    min-height: 48px;
+                    display: flex;
+                    align-items: flex-start;
+                }
+                .disabled-section {
+                    opacity: 0.5;
+                    pointer-events: none;
+                    position: relative;
+                }
+                .disabled-section * {
+                    cursor: not-allowed;
+                }
+                .disabled-label {
+                    color: #9ca3af !important;
+                }
+            </style>
+        ''')
         
-        # Main container
-        with ui.column().classes('w-full max-w-4xl mx-auto p-6 gap-4'):
-            # Title
-            ui.label(t('app_title')).classes('text-3xl font-bold mb-4')
-            
-            # Operation mode selection
-            with ui.card().classes('w-full'):
-                ui.label(t('select_operation_mode')).classes('text-xl font-semibold mb-2')
-                with ui.row().classes('w-full gap-2'):
+        # Header with title and language switcher
+        with ui.row().classes('w-full items-center justify-between p-4 bg-gray-50 border-b'):
+            ui.label(t('app_title')).classes('text-2xl font-bold')
+            with ui.row().classes('gap-3 items-center'):
+                ui.button('English', on_click=lambda: self.switch_language('en')).props('flat size=md').classes('text-base px-4 py-2')
+                ui.button('中文', on_click=lambda: self.switch_language('zh')).props('flat size=md').classes('text-base px-4 py-2')
+        
+        # Main container with 2x3 grid layout
+        with ui.column().classes('main-container gap-4'):
+            # 2x3 grid: 1 2 3 / 4 5 6
+            # 1: 操作模式, 2: 水印设置, 3+6: 选择文件（row-span-2）, 4+5: 文件输出（col-span-2）
+            with ui.row().classes('three-column-grid gap-4'):
+                # 1: 操作模式
+                with ui.card().classes('card-compact fixed-card'):
+                    ui.label(t('select_operation_mode')).classes('section-title')
                     self.mode_radio = ui.radio(
                         {
                             'pdf': t('process_pdf_with_watermark'),
@@ -72,167 +184,306 @@ class WebUI:
                         },
                         value='pdf'
                     ).classes('w-full')
-            
-            # File upload section
-            with ui.card().classes('w-full'):
-                ui.label('选择文件 / Select Files').classes('text-xl font-semibold mb-2')
-                # 选择文件后自动上传，更符合当前需求
-                ui.upload(
-                    label='选择文件后自动上传 / Automatically upload after selecting files',
-                    on_upload=self.handle_file_upload,
-                    multiple=True,
-                    auto_upload=True
-                ).classes('w-full')
-                
-                # Display uploaded files
-                self.uploaded_files_label = ui.label('').classes('mt-2')
-                self.update_uploaded_files_display()
 
-                # Container for per-file progress bars
-                self.file_progress_container = ui.column().classes('w-full mt-2 gap-1')
-                
-                # Docsy front matter filter option (only show for markdown modes)
-                # 默认勾选，用户可以取消
-                self.filter_front_matter_checkbox = ui.checkbox(
-                    t('filter_docsy_front_matter'),
-                    value=True,
-                ).classes('mt-4')
-                
-                # Rename PDF by H1 title option (only show for markdown modes)
-                self.rename_by_title_checkbox = ui.checkbox(
-                    t('rename_pdf_by_h1_title'),
-                    value=False,
-                ).classes('mt-2')
-                
-                # Show/hide filter checkbox based on mode
-                def update_filter_visibility(e=None):
+                # 2: 水印设置（always visible, grayed out when disabled）
+                self.watermark_card = ui.card().classes('card-compact fixed-card')
+                self.watermark_card_content = None
+                self.watermark_title_label = None
+                self.watermark_type_radio = None
+                self.watermark_text_input = None
+                self.watermark_image_path: Optional[str] = None  # 存储上传的水印图片路径
+                self.add_date_checkbox = None
+                self.watermark_image_upload = None
+
+                def update_watermark_visibility(e=None):
+                    """Update watermark visibility based on mode."""
                     mode = self.mode_radio.value
-                    # Show filter option for markdown conversion modes
-                    show_filter = mode in ['markdown', 'markdown_no_watermark']
-                    self.filter_front_matter_checkbox.set_visibility(show_filter)
-                    self.rename_by_title_checkbox.set_visibility(show_filter)
-                
-                # Set initial visibility
-                update_filter_visibility()
-                # Update on mode change
-                self.mode_radio.on('update:model-value', lambda e: update_filter_visibility())
+                    is_disabled = (mode == 'markdown_no_watermark')
+
+                    if self.watermark_card_content:
+                        if is_disabled:
+                            # Gray out but keep visible
+                            self.watermark_card_content.classes('w-full disabled-section')
+                            if self.watermark_title_label:
+                                self.watermark_title_label.classes('section-title disabled-label')
+                        else:
+                            # Show normally - remove disabled classes
+                            self.watermark_card_content.classes(remove='disabled-section')
+                            self.watermark_card_content.classes('w-full')
+                            if self.watermark_title_label:
+                                self.watermark_title_label.classes(remove='disabled-label')
+                                self.watermark_title_label.classes('section-title')
+
+                    # All controls are disabled via CSS when is_disabled is True
+                    # The disabled-section class handles opacity and pointer-events
+
+                with self.watermark_card:
+                    self.watermark_card_content = ui.column().classes('w-full')
+                    with self.watermark_card_content:
+                        self.watermark_title_label = ui.label(t('watermark_type_title')).classes('section-title')
+                        self.watermark_type_radio = ui.radio(
+                            {
+                                'text': t('text_watermark_recommended'),
+                                'image': t('image_watermark'),
+                            },
+                            value='text'
+                        ).classes('w-full mb-3').props('inline')
+
+                        # Text watermark config
+                        with ui.column().bind_visibility_from(self.watermark_type_radio, 'value', lambda v: v == 'text'):
+                            self.watermark_text_input = ui.input(
+                                label=t('enter_watermark_text'),
+                                placeholder=t('enter_watermark_text_placeholder'),
+                                value='Watermark'
+                            ).classes('w-full')
+
+                            self.add_date_checkbox = ui.checkbox(
+                                t('add_date'),
+                                value=True
+                            ).classes('mt-2')
+
+                        # Image watermark config
+                        image_watermark_column = ui.column().classes('w-full').bind_visibility_from(self.watermark_type_radio, 'value', lambda v: v == 'image')
+                        with image_watermark_column:
+                            # 只保留上传组件，使用与"选择文件"相同的设置
+                            self.watermark_image_upload = ui.upload(
+                                label=t('upload_watermark_image'),
+                                on_upload=self.handle_watermark_image_upload,
+                                auto_upload=True
+                            ).classes('w-full')
+
+                # 初始化水印区域可见性
+                update_watermark_visibility()
+                self.mode_radio.on('update:model-value', lambda e: update_watermark_visibility(e))
+
+                # 3+6: 选择文件（右侧整列，row-span-2）
+                with ui.card().classes('card-compact fixed-card row-span-2 file-selection-tall'):
+                    self.file_selection_title_label = ui.label(t('select_files')).classes('section-title')
+
+                    # File selection container for enabling/disabling
+                    self.file_selection_container = ui.column().classes('w-full h-full justify-between')
+                    with self.file_selection_container:
+                        self.file_upload_widget = ui.upload(
+                            label=t('auto_upload_hint'),
+                            on_upload=self.handle_file_upload,
+                            multiple=True,
+                            auto_upload=True
+                        ).classes('w-full')
+
+                        # Display uploaded files
+                        self.uploaded_files_label = ui.label('').classes('mt-2 text-sm')
+
+                        # Markdown options container (always takes space)
+                        self.markdown_options_container = ui.column().classes('w-full mt-3 markdown-options-container')
+                        with self.markdown_options_container:
+                            with ui.row().classes('w-full gap-4'):
+                                self.filter_front_matter_checkbox = ui.checkbox(
+                                    t('filter_docsy_front_matter'),
+                                    value=True,
+                                )
+
+                                self.rename_by_title_checkbox = ui.checkbox(
+                                    t('rename_pdf_by_h1_title'),
+                                    value=False,
+                                )
+
+                        # “开始处理”按钮：固定在选择文件卡片底部，居中显示
+                        with ui.row().classes('w-full justify-center mt-auto pt-4 border-t'):
+                            self.process_button = ui.button(
+                                t('start_processing'),
+                                on_click=self.process_files,
+                                color='primary',
+                            ).classes('text-lg px-6')
+
+                    # Enable/disable file selection and markdown options based on mode
+                    def update_file_selection_visibility(e=None):
+                        """Update file selection and markdown options visibility based on mode."""
+                        mode = self.mode_radio.value
+                        # File upload is needed for all modes except watermark_only
+                        file_upload_needed = (mode != 'watermark_only')
+                        # Markdown options are only needed for markdown modes
+                        markdown_options_needed = mode in ['markdown', 'markdown_no_watermark']
+
+                        # Update file selection visibility
+                        if file_upload_needed:
+                            # Remove disabled style and show normally
+                            self.file_selection_container.classes(remove='disabled-section')
+                            self.file_selection_container.classes('w-full')
+                            if self.file_selection_title_label:
+                                self.file_selection_title_label.classes(remove='disabled-label')
+                                self.file_selection_title_label.classes('section-title')
+                        else:
+                            # Add disabled-section class
+                            self.file_selection_container.classes('w-full disabled-section')
+                            if self.file_selection_title_label:
+                                self.file_selection_title_label.classes('section-title disabled-label')
+
+                        # Update markdown options visibility
+                        if markdown_options_needed:
+                            # Remove disabled style and show normally
+                            self.markdown_options_container.classes(remove='disabled-section')
+                            self.markdown_options_container.classes('w-full mt-3 markdown-options-container')
+                        else:
+                            # Add disabled-section class
+                            self.markdown_options_container.classes('w-full mt-3 markdown-options-container disabled-section')
+
+                    # Initialize once and update on mode change
+                    update_file_selection_visibility()
+                    self.mode_radio.on('update:model-value', lambda e: update_file_selection_visibility(e))
+
+                # 4+5: 文件输出（占据第二行的前两列，col-span-2）
+                with ui.card().classes('w-full card-compact fixed-card col-span-2'):
+                    with ui.row().classes('w-full items-center justify-between mb-2'):
+                        ui.label(t('processed_files')).classes('section-title mb-0')
+                        self.clear_files_button = ui.button(
+                            icon='delete',
+                            on_click=self.clear_processed_files,
+                        ).props('flat round').classes('text-gray-500')
+
+                    self.file_list_container = ui.column().classes('w-full gap-2')
+                    self.update_file_list()
             
-            # Watermark configuration (only for modes that need watermark)
-            self.watermark_card = ui.card().classes('w-full')
-            
-            # Show/hide watermark card based on mode
-            def update_watermark_visibility(e=None):
-                mode = self.mode_radio.value
-                self.watermark_card.set_visibility(mode != 'markdown_no_watermark')
-            
-            # Set initial visibility
-            update_watermark_visibility()
-            # Update on mode change
-            self.mode_radio.on('update:model-value', lambda e: update_watermark_visibility())
-            
-            with self.watermark_card:
-                ui.label(t('watermark_type_title')).classes('text-xl font-semibold mb-2')
-                self.watermark_type_radio = ui.radio(
-                    {
-                        'text': t('text_watermark_recommended'),
-                        'image': t('image_watermark'),
-                    },
-                    value='text'
-                ).classes('w-full mb-4')
-                
-                # Text watermark config
-                with ui.column().bind_visibility_from(self.watermark_type_radio, 'value', lambda v: v == 'text'):
-                    ui.label(t('enter_watermark_text')).classes('font-semibold')
-                    self.watermark_text_input = ui.input(
-                        label='',
-                        placeholder='输入水印文本 / Enter watermark text',
-                        value='Watermark'
-                    ).classes('w-full')
-                    
-                    self.add_date_checkbox = ui.checkbox(
-                        t('add_date_to_watermark').replace('? (y/n, default: y):', ''),
-                        value=True
-                    ).classes('mt-2')
-                
-                # Image watermark config
-                with ui.column().bind_visibility_from(self.watermark_type_radio, 'value', lambda v: v == 'image'):
-                    ui.label(t('enter_watermark_image_path')).classes('font-semibold')
-                    self.watermark_image_input = ui.input(
-                        label='',
-                        placeholder='输入图片路径 / Enter image path',
-                    ).classes('w-full')
-                    
-                    ui.upload(
-                        label='或上传水印图片 / Or upload watermark image',
-                        on_upload=self.handle_watermark_image_upload,
-                        auto_upload=True
-                    ).classes('w-full mt-2')
-            
-            # Advanced settings (collapsible)
-            with ui.expansion('高级设置 / Advanced Settings').classes('w-full'):
-                with ui.column().classes('gap-2'):
-                    ui.label('水印类型 / Watermark Type')
-                    self.watermark_style_select = ui.select(
-                        ['grid', 'insert'],
-                        value='grid',
-                        label=''
-                    ).classes('w-full')
-                    
-                    ui.label('透明度 / Opacity')
-                    self.opacity_slider = ui.slider(
-                        min=0.0, max=1.0, step=0.05, value=0.2
-                    ).classes('w-full')
-                    self.opacity_label = ui.label('0.2')
-                    self.opacity_slider.on('update:model-value', 
-                        lambda e: self.opacity_label.set_text(f'{e.args:.2f}'))
-                    
-                    ui.label('角度 / Angle')
-                    self.angle_slider = ui.slider(
-                        min=0, max=360, step=5, value=45
-                    ).classes('w-full')
-                    self.angle_label = ui.label('45°')
-                    self.angle_slider.on('update:model-value', 
-                        lambda e: self.angle_label.set_text(f'{e.args}°'))
-                    
-                    ui.label('水平网格数 / Horizontal Boxes')
-                    self.horizontal_boxes_input = ui.number(
-                        label='', value=3, min=1, max=10
-                    ).classes('w-full')
-                    
-                    ui.label('垂直网格数 / Vertical Boxes')
-                    self.vertical_boxes_input = ui.number(
-                        label='', value=6, min=1, max=20
-                    ).classes('w-full')
-            
-            # Process button
-            self.process_button = ui.button(
-                '开始处理 / Start Processing',
-                on_click=self.process_files,
-                color='primary'
-            ).classes('w-full mt-4 text-lg')
-            
-            # Status display
-            self.status_label = ui.label('').classes('w-full mt-4')
-            self.status_label.visible = False
-            
-            # Progress bar
-            self.progress_bar = ui.linear_progress(value=0).classes('w-full mt-2')
-            self.progress_bar.visible = False
-    
+            # 底部：保留一个轻微的间距（不再放按钮）
+            ui.separator().classes('opacity-0')
+
     def switch_language(self, lang: str):
-        """Switch language"""
+        """Switch language and reload page"""
         i18n.set_language(lang)
         self.current_language = lang
-        ui.notify(f'Language switched to {lang}')
-        # Note: Full page reload would require JavaScript, for now just update the language
-        # The next interaction will use the new language
+        ui.notify(t('language_switched', lang=lang))
+        # Reload page to update all text
+        ui.run_javascript('location.reload()')
+    
+    def update_file_list(self) -> None:
+        """渲染“处理结果文件”列表的新实现"""
+        if self.file_list_container is None:
+            return
+
+        # 清空容器
+        self.file_list_container.clear()
+
+        # 处理中时，隐藏列表内容，仅显示加载动画，并禁用清空按钮
+        if self.is_processing:
+            if self.clear_files_button is not None:
+                self.clear_files_button.disable()
+
+            with self.file_list_container:
+                with ui.row().classes('w-full items-center justify-center py-4 gap-3 text-gray-500'):
+                    ui.spinner(size='md', color='primary')
+                    ui.label(t('processing'))
+            return
+        else:
+            if self.clear_files_button is not None:
+                self.clear_files_button.enable()
+
+        # 没有任何文件时的空状态
+        if not self.processed_files:
+            with self.file_list_container:
+                with ui.row().classes('items-center gap-2 text-gray-400'):
+                    ui.icon('insert_drive_file')
+                    ui.label(t('no_processed_files')).classes('text-sm')
+            return
+
+        # 有文件时，逐条渲染
+        with self.file_list_container:
+            for file_path in self.processed_files:
+                self._render_processed_file_item(file_path)
+
+    def _render_processed_file_item(self, file_path: Path) -> None:
+        """渲染单个处理结果文件的行"""
+        file_exists = file_path.exists()
+        if file_exists:
+            file_size = file_path.stat().st_size
+            file_size_str = self.format_file_size(file_size)
+        else:
+            file_size_str = t('processing')
+
+        with ui.row().classes('w-full items-center gap-3 p-3 border rounded-lg hover:bg-gray-50 transition-colors'):
+            # 图标：已完成用绿色勾，其他用默认文档图标
+            if file_exists:
+                ui.icon('check_circle').classes('text-green-500')
+            else:
+                ui.icon('description').classes('text-gray-400')
+
+            # 文件名和大小
+            with ui.column().classes('flex-1 min-w-0'):
+                ui.label(file_path.name).classes('font-medium truncate')
+                ui.label(file_size_str).classes('text-xs text-gray-500')
+
+            # 操作区
+            with ui.row().classes('gap-1'):
+                # 下载按钮：仅在文件已生成且当前不在全局处理中时可用
+                download_btn = ui.button(
+                    icon='download',
+                    on_click=lambda f=file_path: self.download_file(f),
+                ).props('flat round').classes('text-primary')
+                if not file_exists or self.is_processing:
+                    download_btn.disable()
+
+                # 删除按钮：始终可用
+                ui.button(
+                    icon='delete',
+                    on_click=lambda f=file_path: self.delete_file(f),
+                ).props('flat round').classes('text-red-500')
+    
+    def format_file_size(self, size_bytes: int) -> str:
+        """Format file size in human-readable format"""
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.1f} TB"
+    
+    def download_file(self, file_path: Path) -> None:
+        """下载单个处理结果文件"""
+        if not file_path.exists():
+            ui.notify(t('file_not_found'), type='negative')
+            return
+
+        ui.download(str(file_path))
+        ui.notify(t('downloading', filename=file_path.name))
+
+    def delete_file(self, file_path: Path) -> None:
+        """删除单个处理结果文件并从列表中移除"""
+        try:
+            if file_path.exists():
+                file_path.unlink()
+
+            if file_path in self.processed_files:
+                self.processed_files.remove(file_path)
+
+            self.update_file_list()
+            ui.notify(t('file_deleted', filename=file_path.name), type='positive')
+        except Exception as e:
+            ui.notify(t('delete_failed', error=str(e)), type='negative')
+
+    def clear_processed_files(self) -> None:
+        """清空所有处理结果文件及其在磁盘上的对应文件"""
+        # 复制列表，避免迭代时修改原列表
+        files_to_delete = list(self.processed_files)
+        deleted_count = 0
+
+        for file_path in files_to_delete:
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+                deleted_count += 1
+            except Exception:
+                # 单个文件删除失败不影响整体流程
+                continue
+
+        self.processed_files.clear()
+        self.update_file_list()
+
+        if deleted_count > 0:
+            ui.notify(t('all_files_cleared'), type='positive')
     
     async def handle_file_upload(self, e: UploadEventArguments):
         """Handle file upload"""
         # Newer NiceGUI passes file info via e.file
         file_obj = getattr(e, 'file', None)
         if file_obj is None:
-            ui.notify('上传失败：无法获取文件信息 / Upload failed: no file info', type='negative')
+            ui.notify(t('upload_failed'), type='negative')
             return
 
         filename = getattr(file_obj, 'name', 'uploaded_file')
@@ -248,27 +499,14 @@ class WebUI:
             f.write(data)
 
         self.uploaded_files[filename] = str(save_path)
-        self.update_uploaded_files_display()
 
-        # Create or reset per-file progress bar for this file
-        # Show 0 initially; will move to 1.0 when processing is done
-        bar = self.file_progress_bars.get(filename)
-        if bar is None:
-            with self.file_progress_container:
-                row = ui.row().classes('w-full items-center gap-2')
-                ui.label(filename).classes('flex-1 text-sm truncate')
-                bar = ui.linear_progress(value=0.0).classes('w-1/3')
-            self.file_progress_bars[filename] = bar
-        else:
-            bar.set_value(0.0)
-
-        ui.notify(f'文件已上传: {filename} / File uploaded: {filename}')
+        ui.notify(t('file_uploaded', filename=filename))
     
     async def handle_watermark_image_upload(self, e: UploadEventArguments):
         """Handle watermark image upload"""
         file_obj = getattr(e, 'file', None)
         if file_obj is None:
-            ui.notify('水印图片上传失败：无法获取文件信息 / Watermark upload failed: no file info', type='negative')
+            ui.notify(t('watermark_upload_failed'), type='negative')
             return
 
         filename = getattr(file_obj, 'name', 'watermark')
@@ -281,27 +519,21 @@ class WebUI:
         with open(save_path, 'wb') as f:
             f.write(data)
         
-        self.watermark_image_input.set_value(str(save_path))
-        ui.notify(f'水印图片已上传 / Watermark image uploaded: {filename}')
+        # 保存上传的水印图片路径
+        self.watermark_image_path = str(save_path)
+        ui.notify(t('watermark_image_uploaded', filename=filename))
     
-    def update_uploaded_files_display(self):
-        """Update uploaded files display"""
-        if self.uploaded_files:
-            files_list = '\n'.join([f'• {name}' for name in self.uploaded_files.keys()])
-            self.uploaded_files_label.set_text(f'已上传文件 / Uploaded files:\n{files_list}')
-        else:
-            self.uploaded_files_label.set_text('未上传文件 / No files uploaded')
     
     def build_config(self) -> Dict[str, Any]:
         """Build configuration from UI inputs"""
         config = {
             'mode': self.mode_radio.value,
-            'watermark_type': self.watermark_style_select.value,
-            'opacity': self.opacity_slider.value,
-            'angle': self.angle_slider.value,
-            'horizontal_boxes': int(self.horizontal_boxes_input.value),
-            'vertical_boxes': int(self.vertical_boxes_input.value),
-            'image_scale': 1.0,
+            'watermark_type': WatermarkConfig.WATERMARK_TYPE,  # Use default
+            'opacity': WatermarkConfig.OPACITY,  # Use default
+            'angle': WatermarkConfig.ANGLE,  # Use default
+            'horizontal_boxes': WatermarkConfig.HORIZONTAL_BOXES,  # Use default
+            'vertical_boxes': WatermarkConfig.VERTICAL_BOXES,  # Use default
+            'image_scale': WatermarkConfig.IMAGE_SCALE,
             'input_dir': 'temp_uploads',
             'output_dir': 'output',
             'verbose': False,
@@ -316,22 +548,24 @@ class WebUI:
                 config['text'] = self.watermark_text_input.value or 'Watermark'
                 config['add_date'] = self.add_date_checkbox.value
             else:
-                image_path = self.watermark_image_input.value
+                # 从上传的图片路径获取
+                image_path = self.watermark_image_path
                 if image_path and Path(image_path).exists():
                     config['image'] = image_path
                 else:
-                    raise ValueError('水印图片路径无效 / Invalid watermark image path')
+                    raise ValueError(t('invalid_watermark_image_path'))
         elif config['mode'] == 'watermark_only':
             config['type'] = self.watermark_type_radio.value
             if config['type'] == 'text':
                 config['text'] = self.watermark_text_input.value or 'Watermark'
                 config['add_date'] = self.add_date_checkbox.value
             else:
-                image_path = self.watermark_image_input.value
+                # 从上传的图片路径获取
+                image_path = self.watermark_image_path
                 if image_path and Path(image_path).exists():
                     config['image'] = image_path
                 else:
-                    raise ValueError('水印图片路径无效 / Invalid watermark image path')
+                    raise ValueError(t('invalid_watermark_image_path'))
         
         # Apply defaults
         config.update({
@@ -347,7 +581,7 @@ class WebUI:
         try:
             # Validate uploaded files
             if not self.uploaded_files and self.mode_radio.value != 'watermark_only':
-                ui.notify('请先上传文件 / Please upload files first', type='negative')
+                ui.notify(t('please_upload_files_first'), type='negative')
                 return
             
             # Build configuration
@@ -389,15 +623,27 @@ class WebUI:
                         # Best-effort cleanup; ignore failures
                         pass
             
-            # Show progress
+            # BEFORE processing: pre-populate file output list with expected output files
+            expected_outputs: List[Path] = []
+            output_dir = Path('output')
+            if self.config['mode'] == 'pdf':
+                if selected_pdf_files:
+                    expected_outputs = [output_dir / p.name for p in selected_pdf_files]
+                elif selected_md_files:
+                    expected_outputs = [output_dir / f'{p.stem}.pdf' for p in selected_md_files]
+            elif self.config['mode'] in ['markdown', 'markdown_no_watermark']:
+                expected_outputs = [output_dir / f'{p.stem}.pdf' for p in selected_md_files]
+            # watermark_only 模式没有文件输出列表
+            if expected_outputs:
+                self.processed_files = expected_outputs
+                self.update_file_list()
+
+            # 标记为处理中，并禁用按钮
+            self.is_processing = True
+            # Disable button while processing
             self.process_button.disable()
-            self.progress_bar.visible = True
-            self.progress_bar.set_value(0.1)
-            self.status_label.visible = True
-            self.status_label.set_text('正在处理... / Processing...')
-            # Reset per-file progress bars to 0 before starting
-            for bar in self.file_progress_bars.values():
-                bar.set_value(0.0)
+            # 点击后立即更新文件输出区域：展示加载动画，隐藏旧结果
+            self.update_file_list()
             
             # Create output directory
             output_dir = Path('output')
@@ -406,64 +652,61 @@ class WebUI:
             # Process based on mode
             watermark_image: Optional[str] = None
             success = False
+            output_files: List[Path] = []
             
             try:
                 if self.config['mode'] == 'watermark_only':
-                    self.status_label.set_text(t('start_generating_watermark'))
-                    watermark_image = _setup_watermark_image(self.config)
+                    watermark_image = setup_watermark_image(self.config)
                     if watermark_image:
-                        self.status_label.set_text(f'{t("watermark_image_generated")} {watermark_image}')
-                        ui.notify('水印生成成功 / Watermark generated successfully', type='positive')
+                        ui.notify(t('watermark_generated_successfully'), type='positive')
                         success = True
                     else:
-                        self.status_label.set_text('✗ ' + t('watermark_image_not_found'))
-                        ui.notify('水印生成失败 / Watermark generation failed', type='negative')
+                        ui.notify(t('watermark_generation_failed'), type='negative')
                 
                 elif self.config['mode'] == 'markdown_no_watermark':
-                    self.status_label.set_text(t('start_converting_md_no_watermark'))
                     if not selected_md_files:
-                        self.status_label.set_text('未找到可处理的Markdown文件 / No Markdown files selected')
-                        ui.notify('未找到可处理的Markdown文件 / No Markdown files selected', type='warning')
+                        ui.notify(t('no_markdown_files_selected'), type='warning')
                         return
                     # Run markdown conversion in a worker thread to avoid Playwright sync API inside event loop
-                    success = await asyncio.to_thread(
-                        _process_markdown_files_no_watermark,
+                    success, output_files = await asyncio.to_thread(
+                        process_markdown_files,
                         'temp_uploads',
                         'output',
+                        None,  # no watermark
                         self.config,
                         selected_md_files,
+                        no_watermark=True,
                     )
                 
                 else:
                     # Setup watermark
-                    self.progress_bar.set_value(0.2)
-                    watermark_image = _setup_watermark_image(self.config)
+                    watermark_image = setup_watermark_image(self.config)
                     if not watermark_image:
-                        self.status_label.set_text('✗ ' + t('watermark_image_not_found'))
-                        ui.notify('水印图片未找到 / Watermark image not found', type='negative')
+                        ui.notify(t('watermark_image_not_found'), type='negative')
                         return
-                    
-                    self.progress_bar.set_value(0.4)
                     
                     # Process files
                     if self.config['mode'] == 'pdf':
                         # Only process the currently selected files in temp_uploads
                         if selected_pdf_files:
-                            self.status_label.set_text('处理PDF文件... / Processing PDF files...')
                             # Offload PDF processing to worker thread (CPU/IO heavy)
-                            success = await asyncio.to_thread(
-                                _process_pdf_files,
+                            success, output_files = await asyncio.to_thread(
+                                process_pdf_files,
                                 'temp_uploads',
                                 'output',
                                 watermark_image,
-                                self.config,
+                                self.config.get('watermark_type', 'grid'),
                                 selected_pdf_files,
+                                horizontal_boxes=self.config.get('horizontal_boxes', 3),
+                                vertical_boxes=self.config.get('vertical_boxes', 6),
+                                angle=self.config.get('angle', 45),
+                                opacity=self.config.get('opacity', 0.2),
+                                image_scale=self.config.get('image_scale', 1.0),
                             )
                         elif selected_md_files:
                             # Fallback to markdown: only for selected markdown files
-                            self.status_label.set_text('处理Markdown文件... / Processing Markdown files...')
-                            success = await asyncio.to_thread(
-                                _process_markdown_files,
+                            success, output_files = await asyncio.to_thread(
+                                process_markdown_files,
                                 'temp_uploads',
                                 'output',
                                 watermark_image,
@@ -471,18 +714,15 @@ class WebUI:
                                 selected_md_files,
                             )
                         else:
-                            self.status_label.set_text('未找到可处理的文件 / No files found')
-                            ui.notify('未找到可处理的文件 / No files found', type='warning')
+                            ui.notify(t('no_files_found'), type='warning')
                             return
                     else:
                         # Markdown modes: only process selected markdown files
-                        self.status_label.set_text('处理Markdown文件... / Processing Markdown files...')
                         if not selected_md_files:
-                            self.status_label.set_text('未找到可处理的Markdown文件 / No Markdown files selected')
-                            ui.notify('未找到可处理的Markdown文件 / No Markdown files selected', type='warning')
+                            ui.notify(t('no_markdown_files_selected'), type='warning')
                             return
-                        success = await asyncio.to_thread(
-                            _process_markdown_files,
+                        success, output_files = await asyncio.to_thread(
+                            process_markdown_files,
                             'temp_uploads',
                             'output',
                             watermark_image,
@@ -490,60 +730,33 @@ class WebUI:
                             selected_md_files,
                         )
                     
-                    self.progress_bar.set_value(0.9)
-                    
                     # Cleanup generated watermark
                     if watermark_image and self.config['mode'] != 'watermark_only':
-                        _cleanup_generated_watermark(watermark_image, self.config)
+                        cleanup_generated_watermark(watermark_image, self.config)
                 
-                self.progress_bar.set_value(1.0)
-                # Update per-file progress bars at the end: mark all as completed or failed
-                final_value = 1.0 if success else 0.0
-                for bar in self.file_progress_bars.values():
-                    bar.set_value(final_value)
+                # Update processed files list
+                if success and output_files:
+                    self.processed_files = output_files
+                    self.update_file_list()
                 
                 if success:
-                    self.status_label.set_text('处理完成！/ Processing completed!')
-                    ui.notify('处理成功 / Processing successful', type='positive')
+                    ui.notify(t('processing_successful'), type='positive')
                 else:
-                    self.status_label.set_text('处理失败 / Processing failed')
-                    ui.notify('处理失败 / Processing failed', type='negative')
+                    ui.notify(t('processing_failed'), type='negative')
             
             except Exception as e:
-                self.status_label.set_text(f'错误 / Error: {str(e)}')
-                ui.notify(f'错误 / Error: {str(e)}', type='negative')
+                ui.notify(t('error', error=str(e)), type='negative')
                 success = False
             
             finally:
+                # 标记处理结束并刷新列表（此时存在的文件会显示下载按钮）
+                self.is_processing = False
+                self.update_file_list()
                 self.process_button.enable()
-                # Reset progress after 3 seconds
-                def reset_progress():
-                    self.progress_bar.set_value(0)
-                ui.timer(3.0, reset_progress, once=True)
         
         except Exception as e:
-            self.status_label.set_text(f'配置错误 / Configuration error: {str(e)}')
-            ui.notify(f'配置错误 / Configuration error: {str(e)}', type='negative')
+            ui.notify(t('configuration_error', error=str(e)), type='negative')
             self.process_button.enable()
-            self.progress_bar.visible = False
-
-
-def run_web_ui(port: int = 8080, show: bool = True, host: str = '0.0.0.0'):
-    """Run the web UI
-    
-    Note: This function is kept for backward compatibility with main.py --web option.
-    For new code, prefer using start_webui.py directly.
-    
-    Args:
-        port: Web server port (default: 8080)
-        show: Whether to automatically open browser (default: True)
-        host: Host to bind to (default: '0.0.0.0')
-    """
-    web_ui = WebUI()
-    web_ui.build_ui()
-    # Note: ui.run() must be called at module level, not inside a function
-    # This function is mainly for backward compatibility
-    ui.run(port=port, show=show, title=t('app_title'), host=host)
 
 
 @app.on_shutdown
