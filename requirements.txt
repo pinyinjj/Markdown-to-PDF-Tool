@@ -12,3 +12,6 @@ playwright
 
 # PDF watermark processing - for adding watermarks to PDF files
 pdf-watermark
+
+# Web UI framework
+nicegui
