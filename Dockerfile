@@ -95,7 +95,6 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # 从 builder 阶段复制 Playwright 浏览器
 COPY --from=builder /ms-playwright /ms-playwright
-COPY --from=builder /root/.cache/ms-playwright /root/.cache/ms-playwright
 
 # 复制项目文件
 COPY . .
