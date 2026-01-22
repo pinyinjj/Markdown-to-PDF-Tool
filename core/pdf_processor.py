@@ -11,20 +11,10 @@ from i18n import t
 
 
 def run_watermark_command(args: List[str]) -> tuple:
-    """
-    Run watermark CLI command and return results.
-    
-    Args:
-        args: List of arguments for watermark command
-        
-    Returns:
-        tuple: (stdout, stderr, return_code) Command execution results
-    """
-    # Try different watermark command paths
     watermark_commands = [
-        "watermark",  # Command in system PATH
-        "pdf-watermark",  # Alternative command name
-        sys.executable.replace("python", "watermark"),  # Command in virtual environment
+        "watermark",
+        "pdf-watermark",
+        sys.executable.replace("python", "watermark"),
     ]
     
     for cmd in watermark_commands:
@@ -43,12 +33,6 @@ def run_watermark_command(args: List[str]) -> tuple:
 
 
 def check_watermark_tool() -> bool:
-    """
-    Check if watermark tool is available.
-    
-    Returns:
-        bool: True if watermark tool is available, False otherwise
-    """
     try:
         subprocess.run(["watermark", "--help"], capture_output=True, text=True, check=True)
         return True
@@ -57,15 +41,6 @@ def check_watermark_tool() -> bool:
 
 
 def get_pdf_files(input_dir: Path) -> List[Path]:
-    """
-    Get all PDF files in the input directory.
-    
-    Args:
-        input_dir: Input directory path
-        
-    Returns:
-        List[Path]: Sorted list of PDF file paths
-    """
     pdf_files: List[Path] = []
     for pattern in ["*.pdf", "*.PDF"]:
         pdf_files.extend(input_dir.glob(pattern))
@@ -82,22 +57,6 @@ def add_watermark_to_file(
     image_scale: float = 1.0,
     **kwargs
 ) -> bool:
-    """
-    Add a watermark to a single PDF file.
-    
-    Args:
-        input_file: Input PDF file path
-        output_file: Output PDF file path
-        watermark_image: Watermark image path
-        watermark_type: Watermark type, default "grid"
-        opacity: Opacity, default 0.2
-        angle: Rotation angle in degrees, default 45
-        image_scale: Image scale, default 1.0
-        **kwargs: Additional parameters such as horizontal_boxes, vertical_boxes
-        
-    Returns:
-        bool: True if succeeded, False otherwise
-    """
     args = [
         watermark_type,
         str(input_file),
@@ -135,20 +94,6 @@ def process_pdf_files(
     files: Optional[List[Path]] = None,
     **kwargs
 ) -> Tuple[bool, List[Path]]:
-    """
-    Process all PDF files in the input directory.
-    
-    Args:
-        input_dir: Input directory path, default "input"
-        output_dir: Output directory path, default "output"
-        watermark_image: Watermark image path
-        watermark_type: Watermark type, default "grid"
-        files: Optional list of specific files to process
-        **kwargs: Other watermark parameters
-        
-    Returns:
-        tuple: (success: bool, output_files: List[Path])
-    """
     input_path = Path(input_dir)
     output_path = Path(output_dir)
     if not input_path.exists():
@@ -156,8 +101,6 @@ def process_pdf_files(
         return False, []
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # If a specific file list is provided, only process those files.
-    # Otherwise, process all PDF files in the input directory.
     pdf_files = sorted(files) if files is not None else get_pdf_files(input_path)
     if not pdf_files:
         print("✗ " + t('no_pdf_files_in_directory', directory=input_dir))
