@@ -1,6 +1,8 @@
+# ============================================
+# Stage 1: Builder - 安装依赖和浏览器
+# ============================================
+FROM python:3.12.3-slim AS builder
 
-FROM python:3.12.3
-# 设置工作目录
 WORKDIR /app
 
 # 设置环境变量
@@ -8,7 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# 安装系统依赖（包括中文字体）
+# 安装构建依赖（包括 Playwright 系统依赖）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Playwright 系统依赖
     libnss3 \
@@ -25,28 +27,75 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 \
     libasound2 \
     libpango-1.0-0 \
-    libatk1.0-0 \
     libcairo2 \
     libgdk-pixbuf2.0-0 \
     libgtk-3-0 \
     # 中文字体支持
     fonts-noto-cjk \
-    fonts-noto-cjk-extra \
-    # 其他字体
     fonts-liberation \
     fonts-dejavu-core \
-    # 清理缓存
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # 复制依赖文件
 COPY requirements.txt .
 
 # 安装 Python 依赖
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # 安装 Playwright 浏览器
-RUN playwright install chromium \
-    && playwright install-deps chromium
+RUN playwright install chromium && \
+    playwright install-deps chromium
+
+# ============================================
+# Stage 2: Runtime - 最终镜像
+# ============================================
+FROM python:3.12.3-slim AS runtime
+
+WORKDIR /app
+
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PATH="/usr/local/bin:${PATH}"
+
+# 只安装运行时系统依赖（不包含构建工具）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Playwright 运行时依赖
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libgdk-pixbuf2.0-0 \
+    libgtk-3-0 \
+    # 中文字体支持
+    fonts-noto-cjk \
+    fonts-liberation \
+    fonts-dejavu-core \
+    # 清理缓存
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# 从 builder 阶段复制已安装的 Python 包和可执行文件
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# 从 builder 阶段复制 Playwright 浏览器
+COPY --from=builder /ms-playwright /ms-playwright
+COPY --from=builder /root/.cache/ms-playwright /root/.cache/ms-playwright
 
 # 复制项目文件
 COPY . .
