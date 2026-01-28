@@ -4,7 +4,7 @@ NiceGUI web interface for PDF watermark tool.
 
 import asyncio
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from nicegui import ui, app
 from nicegui.events import UploadEventArguments
 
@@ -15,6 +15,8 @@ from core import (
     process_pdf_files,
     process_markdown_files,
 )
+from core.pdf_processor import add_watermark_to_file
+from core.markdown_processor import extract_h1_title
 
 
 def cleanup_generated_watermark(watermark_image: Optional[str], config: dict) -> None:
@@ -41,8 +43,11 @@ class WebUI:
         self.current_language = i18n.get_current_language()
         self.is_processing: bool = False
         self.processed_files: List[Path] = []
+        self.file_processing_status: Dict[Path, str] = {}  # 'pending', 'processing', 'completed'
+        self.processing_progress: tuple[int, int] = (0, 0)  # (completed, total)
         self.file_list_container: Optional[ui.column] = None
         self.clear_files_button: Optional[ui.button] = None
+        self.progress_label: Optional[ui.label] = None
         
         temp_dir = Path('temp_uploads')
         temp_dir.mkdir(exist_ok=True)
@@ -59,15 +64,17 @@ class WebUI:
         ui.add_head_html('''
             <style>
                 .main-container { max-width: 1000px; margin: 0 auto; padding: 0.5rem 0.75rem; }
-                .three-column-grid { display: grid !important; grid-template-columns: 1fr 1fr 1fr !important; grid-template-rows: 320px 320px !important; gap: 0.75rem !important; width: 100% !important; }
+                .three-column-grid { display: grid !important; grid-template-columns: 1fr 1fr 1fr !important; grid-template-rows: 320px auto !important; gap: 0.75rem !important; width: 100% !important; }
                 .row-span-2 { grid-row: 1 / 3 !important; grid-column: 3 !important; height: calc(320px + 0.75rem + 320px) !important; }
                 .col-span-2 { grid-column: 1 / 3 !important; grid-row: 2 !important; }
                 @media (max-width: 1024px) { .three-column-grid { grid-template-columns: 1fr; } }
-                .card-compact { padding: 1rem; min-height: 320px; height: 320px; display: flex; flex-direction: column; }
+                .card-compact { padding: 1rem; min-height: 320px; display: flex; flex-direction: column; }
                 .section-title { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: #374151; }
-                .fixed-card { width: 100%; min-height: 320px; height: 320px; }
-                .watermark-card-flexible { width: 100%; min-height: 320px; height: 320px; min-width: 0; flex: 1 1 auto; }
-                .file-selection-tall { height: calc(320px + 0.75rem + 320px) !important; min-height: calc(320px + 0.75rem + 320px) !important; }
+                .fixed-card { width: 100%; min-height: 320px; }
+                .watermark-card-flexible { width: 100%; min-height: 320px; min-width: 0; flex: 1 1 auto; }
+                .file-selection-tall { min-height: calc(320px + 0.75rem + 320px) !important; }
+                .file-selection-dynamic { min-height: calc(320px + 0.75rem + 320px) !important; height: auto !important; flex: 1 1 auto; }
+                .output-card-dynamic { min-height: 320px; height: auto !important; flex: 1 1 auto; }
                 .markdown-options-container { min-height: 48px; display: flex; align-items: flex-start; }
                 .disabled-section { opacity: 0.5; pointer-events: none; position: relative; }
                 .disabled-section * { cursor: not-allowed; }
@@ -230,7 +237,7 @@ class WebUI:
                 update_watermark_mode_behavior(skip_js=True)
                 self.mode_radio.on('update:model-value', lambda e: update_watermark_mode_behavior(e))
 
-                with ui.card().classes('card-compact fixed-card row-span-2 file-selection-tall'):
+                with ui.card().classes('card-compact file-selection-dynamic row-span-2'):
                     self.file_selection_title_label = ui.label(t('select_files')).classes('section-title')
 
                     self.file_selection_container = ui.column().classes('w-full h-full justify-between')
@@ -292,15 +299,17 @@ class WebUI:
                     update_file_selection_visibility()
                     self.mode_radio.on('update:model-value', lambda e: update_file_selection_visibility(e))
 
-                with ui.card().classes('w-full card-compact fixed-card col-span-2'):
-                    with ui.row().classes('w-full items-center justify-between mb-2'):
-                        ui.label(t('processed_files')).classes('section-title mb-0')
+                with ui.card().classes('w-full card-compact output-card-dynamic col-span-2 py-0'):
+                    with ui.row().classes('w-full items-center justify-between pb-0 mb-0'): # Header row: explicit zero padding/margin bottom
+                        ui.label(t('processed_files')).classes('section-title mb-0 mr-4') # Title, added mr-4 for spacing
+                        self.progress_label = ui.label('').classes('text-sm grow text-center -mt-1') # Changed -mt-px to -mt-1
                         self.clear_files_button = ui.button(
                             icon='delete',
                             on_click=self.clear_processed_files,
                         ).props('flat round').classes('text-gray-500')
 
-                    self.file_list_container = ui.column().classes('w-full gap-2')
+                    self.file_list_container = ui.column().classes('w-full gap-1 mt-[-10px] pt-0') # File list container: explicit zero margin/padding top, negative margin for aggressive compaction
+                    self.load_existing_output_files()
                     self.update_file_list()
             
             ui.separator().classes('opacity-0')
@@ -317,18 +326,25 @@ class WebUI:
 
         self.file_list_container.clear()
 
-        if self.is_processing:
-            if self.clear_files_button is not None:
-                self.clear_files_button.disable()
+        # Update button states
+        if self.clear_files_button is not None:
+            self.clear_files_button.enable() if not self.is_processing else self.clear_files_button.disable()
 
-            with self.file_list_container:
-                with ui.row().classes('w-full items-center justify-center py-4 gap-3 text-gray-500'):
-                    ui.spinner(size='md', color='primary')
-                    ui.label(t('processing'))
-            return
-        else:
-            if self.clear_files_button is not None:
-                self.clear_files_button.enable()
+        # Update progress in header
+        if self.progress_label is not None:
+            if self.is_processing and self.processing_progress[1] > 0:
+                # Use current batch progress tracking
+                completed_count, total_count = self.processing_progress
+                progress_percentage = int((completed_count / total_count) * 100)
+                self.progress_label.text = f'{completed_count}/{total_count} {progress_percentage}%'
+                self.progress_label.classes('text-sm text-green-600 font-medium')
+            elif len(self.processed_files) > 0:
+                 # Show total count when not processing
+                 total_count = len(self.processed_files)
+                 self.progress_label.text = t('total_files_count', count=total_count)
+                 self.progress_label.classes('text-sm text-green-600')
+            else:
+                self.progress_label.text = ''
 
         if not self.processed_files:
             with self.file_list_container:
@@ -342,18 +358,29 @@ class WebUI:
                 self._render_processed_file_item(file_path)
 
     def _render_processed_file_item(self, file_path: Path) -> None:
+        status = self.file_processing_status.get(file_path, 'completed')
         file_exists = file_path.exists()
+
+        # Determine file size display
         if file_exists:
             file_size = file_path.stat().st_size
             file_size_str = self.format_file_size(file_size)
         else:
-            file_size_str = t('processing')
+            file_size_str = t('processing') if status == 'processing' else ''
 
-        with ui.row().classes('w-full items-center gap-3 p-3 border rounded-lg hover:bg-gray-50 transition-colors'):
-            if file_exists:
-                ui.icon('check_circle').classes('text-green-500')
+        with ui.row().classes('w-full items-center gap-3 p-3 border rounded-lg hover:bg-gray-100 transition-colors'):
+            # Status icon
+            if status == 'completed' and file_exists:
+                ui.icon('check_circle').props('size=sm').classes('text-green-500')
+            elif status == 'processing':
+                ui.spinner(size='sm', color='primary')
+            elif status == 'pending':
+                ui.spinner(size='sm', color='primary')
+            elif status == 'error':
+                ui.icon('refresh').classes('text-orange-500 cursor-pointer')  # 可点击的重试图标
             else:
-                ui.icon('description').classes('text-gray-400')
+                # Default to processing spinner for unknown states
+                ui.spinner(size='sm', color='primary')
 
             with ui.column().classes('flex-1 min-w-0'):
                 ui.label(file_path.name).classes('font-medium truncate')
@@ -364,7 +391,8 @@ class WebUI:
                     icon='download',
                     on_click=lambda f=file_path: self.download_file(f),
                 ).props('flat round').classes('text-primary')
-                if not file_exists or self.is_processing:
+                # Only enable download for completed files
+                if status != 'completed' or not file_exists:
                     download_btn.disable()
 
                 ui.button(
@@ -384,7 +412,16 @@ class WebUI:
             ui.notify(t('file_not_found'), type='negative')
             return
 
-        ui.download(str(file_path))
+        # Show loading notification and start download
+        ui.notify(t('starting_download', filename=file_path.name), type='info', duration=2)
+
+        # Add a small delay to show the notification
+        import asyncio
+        async def delayed_download():
+            await asyncio.sleep(0.5)  # Small delay to show notification
+            ui.download(str(file_path))
+
+        asyncio.create_task(delayed_download())
         ui.notify(t('downloading', filename=file_path.name))
 
     def delete_file(self, file_path: Path) -> None:
@@ -401,23 +438,54 @@ class WebUI:
             ui.notify(t('delete_failed', error=str(e)), type='negative')
 
     def clear_processed_files(self) -> None:
-        files_to_delete = list(self.processed_files)
+        """Clear all files in the output directory."""
+        output_dir = Path('output')
         deleted_count = 0
 
-        for file_path in files_to_delete:
-            try:
-                if file_path.exists():
-                    file_path.unlink()
-                deleted_count += 1
-            except Exception:
-                continue
+        # Delete all files in output directory
+        if output_dir.exists():
+            for file_path in output_dir.iterdir():
+                if file_path.is_file():
+                    try:
+                        file_path.unlink()
+                        deleted_count += 1
+                    except Exception:
+                        continue
 
+        # Clear the processed files list and status tracking
         self.processed_files.clear()
+        self.file_processing_status.clear()
+        self.processing_progress = (0, 0)
+        if self.progress_label is not None:
+            self.progress_label.text = ''
         self.update_file_list()
 
         if deleted_count > 0:
             ui.notify(t('all_files_cleared'), type='positive')
-    
+        else:
+            ui.notify(t('no_files_to_clear'), type='info')
+
+    def load_existing_output_files(self) -> None:
+        """Load existing files from the output directory."""
+        output_dir = Path('output')
+        if not output_dir.exists():
+            return
+
+        # Clear current processed files list
+        self.processed_files.clear()
+        self.file_processing_status.clear()
+
+        # Load all files from output directory
+        for file_path in output_dir.iterdir():
+            if file_path.is_file():
+                # Include PDF files and common image formats (for watermarks)
+                if file_path.suffix.lower() in ['.pdf', '.png', '.jpg', '.jpeg']:
+                    self.processed_files.append(file_path)
+                    self.file_processing_status[file_path] = 'completed'
+
+        # Sort files by modification time (newest first)
+        self.processed_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+
     def recreate_upload_widget(self) -> None:
         """Recreate the file upload widget to reset its state completely."""
         if not self.file_selection_container or not self.file_upload_widget:
@@ -548,8 +616,32 @@ class WebUI:
             
             # Generate watermark
             watermark_image = setup_watermark_image(config)
-            if watermark_image:
-                ui.notify(t('watermark_generated_successfully'), type='positive')
+            
+            if watermark_image and Path(watermark_image).exists():
+                # Copy to output directory so it appears in the list and persists
+                import shutil
+                output_dir = Path('output')
+                output_dir.mkdir(exist_ok=True)
+                
+                source_path = Path(watermark_image)
+                destination_path = output_dir / source_path.name
+                
+                try:
+                    shutil.copy2(source_path, destination_path)
+                    
+                    # Update processed files list
+                    if destination_path not in self.processed_files:
+                        self.processed_files.insert(0, destination_path)
+                    
+                    # Mark as completed
+                    self.file_processing_status[destination_path] = 'completed'
+                    
+                    # Update UI
+                    self.update_file_list()
+                    
+                    ui.notify(t('watermark_generated_successfully'), type='positive')
+                except Exception as e:
+                    ui.notify(t('error', error=f"Failed to save to output: {e}"), type='negative')
             else:
                 ui.notify(t('watermark_generation_failed'), type='negative')
         except Exception as e:
@@ -596,6 +688,16 @@ class WebUI:
         
         return config
     
+    async def show_conflict_dialog(self, count: int) -> Optional[str]:
+        with ui.dialog() as dialog, ui.card():
+            ui.label(t('conflict_detected', count=count)).classes('text-lg font-bold')
+            ui.label(t('conflict_description')).classes('text-sm text-gray-600')
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button(t('skip_existing'), on_click=lambda: dialog.submit('skip'))
+                ui.button(t('overwrite'), on_click=lambda: dialog.submit('overwrite'))
+                ui.button(t('coexist_rename'), on_click=lambda: dialog.submit('rename'))
+        return await dialog
+
     async def process_files(self):
         try:
             if not self.uploaded_files and self.mode_radio.value != 'watermark_only':
@@ -618,11 +720,18 @@ class WebUI:
                 p for p in selected_paths if p.suffix.lower() in ('.md', '.markdown', '.MD', '.MARKDOWN')
             ]
             
-            # Debug: print uploaded files info
-            if not selected_md_files and not selected_pdf_files:
-                print(f"Debug: uploaded_files = {self.uploaded_files}")
-                print(f"Debug: selected_paths = {selected_paths}")
-                print(f"Debug: All file suffixes = {[p.suffix for p in selected_paths]}")
+            # Validate files for 'pdf' processing mode
+            if self.config['mode'] == 'pdf':
+                non_pdf_files = [
+                    p for p in selected_paths
+                    if p.suffix.lower() != '.pdf' # Only allow PDF files in this mode
+                ]
+                if non_pdf_files:
+                    found_formats = sorted(list(set(p.suffix.lower() for p in non_pdf_files)))
+                    formats_str = ', '.join(found_formats)
+                    ui.notify(t('non_pdf_files_in_pdf_mode_error', formats_found=formats_str), type='negative')
+                    self.process_button.enable()
+                    return
 
             upload_dir = Path('temp_uploads')
             if upload_dir.exists():
@@ -639,24 +748,94 @@ class WebUI:
                     except Exception:
                         pass
             
-            expected_outputs: List[Path] = []
             output_dir = Path('output')
-            if self.config['mode'] == 'pdf':
-                if selected_pdf_files:
-                    expected_outputs = [output_dir / p.name for p in selected_pdf_files]
-                elif selected_md_files:
-                    expected_outputs = [output_dir / f'{p.stem}.pdf' for p in selected_md_files]
-            elif self.config['mode'] == 'markdown':
-                expected_outputs = [output_dir / f'{p.stem}.pdf' for p in selected_md_files]
+            files_to_check = selected_pdf_files + selected_md_files
+            
+            # Pre-calculate target paths to detect conflicts
+            target_map: Dict[Path, Path] = {}
+            conflicts: List[Path] = []
+            
+            for p in files_to_check:
+                if self.config['mode'] == 'pdf':
+                    out_name = p.name
+                elif self.config['mode'] == 'markdown':
+                    if self.config.get('rename_by_title'):
+                        title = extract_h1_title(p)
+                        base_name = title if title else p.stem
+                    else:
+                        base_name = p.stem
+                    out_name = f"{base_name}.pdf"
+                else:
+                    continue
+                
+                out_path = output_dir / out_name
+                target_map[p] = out_path
+                if out_path.exists():
+                    conflicts.append(out_path)
+            
+            conflict_strategy = 'rename'  # Default: Coexist
+            
+            if conflicts and self.config['mode'] != 'watermark_only':
+                result = await self.show_conflict_dialog(len(conflicts))
+                if not result:
+                    self.process_button.enable()
+                    return
+                conflict_strategy = result
+
+            # Filter inputs based on strategy
+            final_pdf_files = []
+            final_md_files = []
+            
+            if conflict_strategy == 'skip':
+                final_pdf_files = [p for p in selected_pdf_files if not target_map.get(p, Path('')).exists()]
+                final_md_files = [p for p in selected_md_files if not target_map.get(p, Path('')).exists()]
+                
+                if not final_pdf_files and not final_md_files:
+                    ui.notify(t('no_files_to_process'), type='warning')
+                    self.process_button.enable()
+                    return
+            else:
+                final_pdf_files = selected_pdf_files
+                final_md_files = selected_md_files
+                
+            # Update expected_outputs for UI
+            expected_outputs: List[Path] = []
+            
+            # Helper to predict output path based on strategy
+            def predict_output(p):
+                base_out = target_map[p]
+                # Ensure .pdf suffix for markdown files, even if the target_map[p] somehow didn't
+                if p.suffix.lower() in ['.md', '.markdown'] and base_out.suffix.lower() != '.pdf':
+                    base_out = base_out.with_suffix('.pdf')
+
+                if conflict_strategy == 'overwrite':
+                    return base_out
+                elif conflict_strategy == 'rename' and base_out.exists():
+                    # Prediction might be off if multiple conflicts, but good enough for UI init
+                    return base_out.parent / f"{base_out.stem}_new{base_out.suffix}"
+                return base_out
+
+            expected_outputs.extend([predict_output(p) for p in final_pdf_files])
+            expected_outputs.extend([predict_output(p) for p in final_md_files])
+
             if expected_outputs:
-                self.processed_files = expected_outputs
+                # Add new files to the beginning of the list, avoiding duplicates
+                for out_path in reversed(expected_outputs):
+                    if out_path in self.processed_files:
+                        self.processed_files.remove(out_path)
+                    self.processed_files.insert(0, out_path)
+                
+                # Initialize status for these specific OUTPUT files
+                for out_path in expected_outputs:
+                    self.file_processing_status[out_path] = 'pending'
+                
+                self.processing_progress = (0, len(expected_outputs))
                 self.update_file_list()
 
             self.is_processing = True
             self.process_button.disable()
             self.update_file_list()
             
-            output_dir = Path('output')
             output_dir.mkdir(exist_ok=True)
             
             watermark_image: Optional[str] = None
@@ -678,51 +857,62 @@ class WebUI:
                         ui.notify(t('watermark_image_not_found'), type='negative')
                         return
                     
+                    # Process files one by one for real-time UI updates
                     if self.config['mode'] == 'pdf':
-                        if selected_pdf_files:
-                            success, output_files = await asyncio.to_thread(
-                                process_pdf_files,
-                                'temp_uploads',
-                                'output',
+                        if final_pdf_files:
+                            success, output_files = await self.process_files_individually(
+                                final_pdf_files,
+                                'pdf',
                                 watermark_image,
-                                self.config.get('watermark_type', 'grid'),
-                                selected_pdf_files,
+                                predicted_output_map={p: target_map[p] for p in final_pdf_files},
+                                conflict_strategy=conflict_strategy,
+                                watermark_type=self.config.get('watermark_type', 'grid'),
                                 horizontal_boxes=self.config.get('horizontal_boxes', 3),
                                 vertical_boxes=self.config.get('vertical_boxes', 6),
                                 angle=self.config.get('angle', 45),
                                 opacity=self.config.get('opacity', 0.2),
                                 image_scale=self.config.get('image_scale', 1.0),
                             )
-                        elif selected_md_files:
-                            success, output_files = await asyncio.to_thread(
-                                process_markdown_files,
-                                'temp_uploads',
-                                'output',
+                        elif final_md_files:
+                            # Filter out keys that conflict with positional arguments
+                            config_kwargs = {k: v for k, v in self.config.items() if k not in ['mode']}
+                            success, output_files = await self.process_files_individually(
+                                final_md_files,
+                                'markdown',
                                 watermark_image,
-                                self.config,
-                                selected_md_files,
+                                predicted_output_map={p: target_map[p] for p in final_md_files},
+                                conflict_strategy=conflict_strategy,
+                                **config_kwargs
                             )
                         else:
                             ui.notify(t('no_files_found'), type='warning')
                             return
                     else:
-                        if not selected_md_files:
+                        if not final_md_files:
                             ui.notify(t('no_markdown_files_selected'), type='warning')
                             return
-                        success, output_files = await asyncio.to_thread(
-                            process_markdown_files,
-                            'temp_uploads',
-                            'output',
+                        # Filter out keys that conflict with positional arguments
+                        config_kwargs = {k: v for k, v in self.config.items() if k not in ['mode']}
+                        success, output_files = await self.process_files_individually(
+                            final_md_files,
+                            'markdown',
                             watermark_image,
-                            self.config,
-                            selected_md_files,
+                            predicted_output_map={p: target_map[p] for p in final_md_files},
+                            conflict_strategy=conflict_strategy,
+                            **config_kwargs
                         )
                     
                     if watermark_image and self.config['mode'] != 'watermark_only':
                         cleanup_generated_watermark(watermark_image, self.config)
                 
                 if success and output_files:
-                    self.processed_files = output_files
+                    # No need to overwrite processed_files here as we did it at start
+                    # But if names changed during processing (e.g. conflict resolution changed name differently than predicted),
+                    # process_files_individually should handle it.
+                    
+                    # Update progress based on completed outputs
+                    completed_count = len([f for f in output_files if f.exists()])
+                    self.processing_progress = (completed_count, len(expected_outputs))
                     self.update_file_list()
                 
                 if success:
@@ -772,6 +962,160 @@ class WebUI:
         except Exception as e:
             ui.notify(t('configuration_error', error=str(e)), type='negative')
             self.process_button.enable()
+
+    async def process_single_file(self, file_path: Path, mode: str, output_file: Path, watermark_image: str, **kwargs) -> bool:
+        """Process a single file."""
+        try:
+            if mode == 'pdf':
+                # Process PDF file
+                success = await asyncio.to_thread(
+                    add_watermark_to_file,
+                    file_path,
+                    output_file,
+                    watermark_image,
+                    kwargs.get('watermark_type', 'grid'),
+                    kwargs.get('opacity', 0.2),
+                    kwargs.get('angle', 45),
+                    kwargs.get('image_scale', 1.0),
+                    horizontal_boxes=kwargs.get('horizontal_boxes', 3),
+                    vertical_boxes=kwargs.get('vertical_boxes', 6)
+                )
+            elif mode == 'markdown':
+                # First convert markdown to PDF
+                from core.markdown_processor import md_to_pdf_with_mermaid_async
+                temp_pdf = output_file.with_suffix('.temp.pdf')
+
+                # Convert markdown to PDF
+                if await md_to_pdf_with_mermaid_async(file_path, temp_pdf, filter_front_matter=kwargs.get('filter_front_matter', False)):
+                    if watermark_image:
+                        # Add watermark to the PDF
+                        success = await asyncio.to_thread(
+                            add_watermark_to_file,
+                            temp_pdf,
+                            output_file,
+                            watermark_image,
+                            kwargs.get('watermark_type', 'grid'),
+                            kwargs.get('opacity', 0.2),
+                            kwargs.get('angle', 45),
+                            kwargs.get('image_scale', 1.0),
+                            horizontal_boxes=kwargs.get('horizontal_boxes', 3),
+                            vertical_boxes=kwargs.get('vertical_boxes', 6)
+                        )
+                        # Clean up temp file
+                        try:
+                            temp_pdf.unlink()
+                        except:
+                            pass
+                    else:
+                        # No watermark, just move the file
+                        import shutil
+                        shutil.move(str(temp_pdf), str(output_file))
+                        success = True
+                else:
+                    success = False
+            else:
+                success = False
+
+            return success
+
+        except Exception as e:
+            print(f"Error processing {file_path.name}: {e}")
+            return False
+
+    async def process_files_individually(self, files: List[Path], mode: str, watermark_image: str, predicted_output_map: Dict[Path, Path], **kwargs) -> Tuple[bool, List[Path]]:
+        """Process files one by one with real-time UI updates."""
+        from pathlib import Path
+
+        output_dir = Path('output')
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        output_files: List[Path] = []
+        success_count = 0
+        
+        conflict_strategy = kwargs.get('conflict_strategy', 'rename')
+        rename_by_title = kwargs.get('rename_by_title', False)
+
+        for file_path in files:
+            # Get the initial predicted output path for this input file
+            predicted_output_path = predicted_output_map.get(file_path)
+            if not predicted_output_path:
+                print(f"Warning: No predicted output path found for input file {file_path}. Skipping.")
+                continue # Skip this file if prediction is missing
+
+            # Determine actual output file path (can be different from predicted if renamed)
+            actual_output_file = Path("") # Initialize
+            if mode == 'markdown':
+                base_name = file_path.stem
+                if rename_by_title:
+                     title = extract_h1_title(file_path)
+                     if title:
+                         base_name = title
+                actual_output_file = (output_dir / base_name).with_suffix('.pdf') # Ensure .pdf suffix
+            else: # mode is 'pdf'
+                base_name = file_path.stem
+                extension = file_path.suffix
+                actual_output_file = output_dir / f"{base_name}{extension}"
+
+            # Apply conflict resolution if the actual_output_file already exists
+            if actual_output_file.exists():
+                if conflict_strategy == 'overwrite':
+                    pass
+                elif conflict_strategy == 'skip':
+                    continue
+                else: # rename (default)
+                    counter = 1
+                    stem = actual_output_file.stem
+                    suffix = actual_output_file.suffix
+                    new_output_file = output_dir / f"{stem}_new{suffix}"
+                    while new_output_file.exists():
+                        counter += 1
+                        new_output_file = output_dir / f"{stem}_new{counter}{suffix}"
+                    actual_output_file = new_output_file
+            
+            # --- Update internal state with the actual, final output file path ---
+            # If the actual output path is different from the predicted one, update self.processed_files and self.file_processing_status
+            if actual_output_file != predicted_output_path:
+                # Remove the predicted (placeholder) path from self.processed_files
+                if predicted_output_path in self.processed_files:
+                    self.processed_files.remove(predicted_output_path)
+                # Remove its status entry
+                if predicted_output_path in self.file_processing_status:
+                    del self.file_processing_status[predicted_output_path]
+                
+                # Insert the actual, final output_file into self.processed_files
+                if actual_output_file not in self.processed_files: # Ensure no accidental re-adds
+                    self.processed_files.insert(0, actual_output_file)
+            
+            # Now, mark the *actual_output_file* as processing
+            self.file_processing_status[actual_output_file] = 'processing'
+            self.update_file_list()
+
+            # Process the file using the actual_output_file
+            try:
+                success = await self.process_single_file(file_path, mode, actual_output_file, watermark_image, **kwargs)
+
+                if success:
+                    success_count += 1
+                    output_files.append(actual_output_file) # Store the actual path
+                    # Mark file as completed using the actual_output_file
+                    self.file_processing_status[actual_output_file] = 'completed'
+                    
+                    # Update progress tuple to reflect actual completion count in this batch
+                    current_completed = self.processing_progress[0] + 1
+                    total_batch = self.processing_progress[1]
+                    self.processing_progress = (current_completed, total_batch)
+                else:
+                    # Mark file as failed
+                    self.file_processing_status[actual_output_file] = 'error'
+            except Exception as e:
+                print(f"Unexpected error processing {file_path.name}: {e}")
+                # Mark file as failed but don't crash the whole process
+                self.file_processing_status[actual_output_file] = 'error'
+            
+            # Update UI after each file
+            self.update_file_list()
+        overall_success = success_count == len(files)
+        return overall_success, output_files
 
 
 @app.on_shutdown

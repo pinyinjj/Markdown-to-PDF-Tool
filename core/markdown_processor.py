@@ -428,6 +428,169 @@ window.__MD_BASE_HREF__ = {json.dumps(base_href)};
             pass
 
 
+async def md_to_pdf_with_mermaid_async(md_path: Path, out_pdf: Path, filter_front_matter: bool = False) -> bool:
+    """
+    Async version of md_to_pdf_with_mermaid for use in async contexts.
+
+    Convert Markdown to a Mermaid-supported PDF using Playwright.
+
+    Args:
+        md_path: Input Markdown file path
+        out_pdf: Output PDF file path
+        filter_front_matter: If True, remove docsy front matter (YAML between --- markers)
+
+    Returns:
+        bool: True if succeeded, False otherwise
+    """
+    try:
+        from playwright.async_api import async_playwright  # type: ignore
+    except Exception:
+        print("✗ " + t('missing_dependency_playwright'))
+        return False
+
+    # Read raw Markdown source; we'll render with markdown-it in the browser to match VSCode markdown-preview-enhanced
+    md_text = md_path.read_text(encoding="utf-8")
+
+    # Remove front matter if requested
+    if filter_front_matter:
+        md_text = remove_docsy_front_matter(md_text)
+
+    md_source_js = json.dumps(md_text)
+
+    # Base directory (as file:// URI) for resolving relative paths in JS (images, local links)
+    base_href = md_path.parent.resolve().as_uri() + "/"
+
+    html = f"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{md_path.stem}</title>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<!-- KaTeX for LaTeX math rendering -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<style>
+@page {{ size: A4; margin: 18mm; }}
+body {{
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;
+  line-height: 1.6;
+}}
+.markdown-body {{ box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; }}
+pre, code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }}
+.mermaid {{ text-align: center; margin: 12px 0; }}
+h1, h2, h3 {{ page-break-after: avoid; }}
+img {{ max-width: 100%; }}
+/* List styling to mirror GitHub/markdown-it */
+.markdown-body ul {{ list-style-type: disc; padding-left: 2em; }}
+.markdown-body ul ul {{ list-style-type: circle; }}
+.markdown-body ul ul ul {{ list-style-type: square; }}
+.markdown-body ol {{ list-style-type: decimal; padding-left: 2em; }}
+.markdown-body ol ol {{ list-style-type: lower-alpha; }}
+.markdown-body ol ol ol {{ list-style-type: lower-roman; }}
+</style>
+<!-- KaTeX JS -->
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{ delimiters: [{{left: '$$', right: '$$', display: true}}, {{left: '$', right: '$', display: false}}] }})"></script>
+<!-- Mermaid -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+<script>
+mermaid.initialize({{
+  startOnLoad: true,
+  theme: 'default',
+  securityLevel: 'loose',
+  fontFamily: 'arial',
+  fontSize: 14
+}});
+</script>
+<!-- markdown-it + plugins -->
+<script src="https://cdn.jsdelivr.net/npm/markdown-it@14.0.0/dist/markdown-it.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markdown-it-anchor@8.6.7/dist/markdownItAnchor.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markdown-it-table-of-contents@0.6.0/dist/markdownItTableOfContents.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markdown-it-highlightjs@4.0.1/dist/markdown-it-highlightjs.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markdown-it-katex@2.0.3/dist/markdown-it-katex.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markdown-it-task-lists@2.1.1/dist/markdown-it-task-lists.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markdown-it-emoji@3.0.0/dist/markdown-it-emoji.umd.js"></script>
+<script>
+const md = markdownit({{
+  html: true,
+  linkify: true,
+  typographer: true,
+  highlight: function (str, lang) {{
+    if (lang && hljs.getLanguage(lang)) {{
+      try {{
+        return hljs.highlight(str, {{ language: lang }}).value;
+      }} catch (__) {{}}
+    }}
+    return '';
+  }}
+}})
+.use(markdownItAnchor, {{ level: [1, 2, 3, 4, 5, 6] }})
+.use(markdownItTableOfContents)
+.use(markdownItHighlightjs)
+.use(markdownItKatex)
+.use(markdownItTaskLists)
+.use(markdownItEmoji);
+
+const mdSource = {md_source_js};
+const rendered = md.render(mdSource);
+document.getElementById('md-root').innerHTML = rendered;
+
+// Re-run KaTeX
+if (typeof renderMathInElement === 'function') {{
+  renderMathInElement(document.body, {{ delimiters: [{{left: '$$', right: '$$', display: true}}, {{left: '$', right: '$', display: false}}] }});
+}}
+
+// Re-run Mermaid
+if (typeof mermaid !== 'undefined') {{
+  mermaid.init();
+}}
+</script>
+</head>
+<body>
+<div id="md-root" class="markdown-body"></div>
+</body>
+</html>"""
+
+    # Write HTML to temporary file
+    import tempfile
+    import os
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
+        f.write(html)
+        tmp_html_path = Path(f.name)
+
+    try:
+        async with async_playwright() as p:
+            # Allow Chromium to load local file:// resources (images, etc.)
+            browser = await p.chromium.launch(args=["--allow-file-access-from-files"])
+            page = await browser.new_page()
+            await page.goto(tmp_html_path.resolve().as_uri(), wait_until="networkidle")
+            try:
+                # Wait until markdown-it rendering produced list items and (if present) mermaid completed
+                await page.wait_for_function("document.querySelectorAll('#md-root li').length > 0", timeout=5000)
+                await page.wait_for_function("document.querySelectorAll('.mermaid').length == 0 || document.querySelectorAll('.mermaid svg').length >= document.querySelectorAll('.mermaid').length", timeout=5000)
+            except Exception:
+                pass
+            # Wait for styles to be fully applied
+            await page.wait_for_timeout(500)
+            await page.pdf(path=str(out_pdf), print_background=True, prefer_css_page_size=True)
+            await browser.close()
+        print("✓ " + t('conversion_successful', input_file=md_path.name, output_file=out_pdf.name))
+        return True
+    except Exception as e:
+        print("✗ " + t('conversion_failed_with_error', file=md_path.name, error=str(e)))
+        return False
+    finally:
+        try:
+            if tmp_html_path.exists():
+                tmp_html_path.unlink()
+        except Exception:
+            # Best-effort cleanup only
+            pass
+
+
 def process_markdown_files(
     input_dir: str = "input",
     output_dir: str = "output",
