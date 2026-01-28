@@ -37,23 +37,25 @@ A secure, privacy-focused web application for converting Markdown to PDF with Gi
 
 
 
-## 🚀 Quick Start with Docker
+## 🚀 Quick Start (using Docker Image)
 
-**One-command deployment - secure, private, and reliable:**
+**Get your secure, private, and reliable Markdown-to-PDF service running in one command:**
 
 ```bash
-# Clone the repository
-git clone https://github.com/pinyinjj/Markdown-to-PDF-Tool.git
-cd md-pdf-watermark
+docker pull pinyinjj/md-pdf-watermark:latest
 
-# Start with Docker Compose
-docker-compose up -d
-
-# Open your browser
-# http://localhost:8080
+docker run -d \
+  --name md-pdf-watermark \
+  -p 8080:8080 \
+  -v md-pdf-watermark_output:/app/output \
+  -v md-pdf-watermark_watermarks:/app/watermarks \
+  -v md-pdf-watermark_temp_uploads:/app/temp_uploads \
+  pinyinjj/md-pdf-watermark:latest
 ```
 
-**That's it!** Your personal Markdown-to-PDF service is now running locally with complete privacy and security.
+**Access Your Service:** Open your browser and navigate to: **http://localhost:8080**
+
+**That's it!** Your personal Markdown-to-PDF service is now running locally with complete privacy and security. For persistent data, Docker volumes `md-pdf-watermark_output`, `md-pdf-watermark_watermarks`, and `md-pdf-watermark_temp_uploads` are created automatically.
 
 ## Operation Modes
 
@@ -86,33 +88,37 @@ The web interface provides four main operation modes:
 ### Prerequisites
 
 - Docker 20.10+
-- Docker Compose 1.29+
 
 ### Quick Start
 
 ```bash
-# Clone and start in one command
-git clone https://github.com/pinyinjj/Markdown-to-PDF-Tool.git
-cd md-pdf-watermark
-docker-compose up -d
+# Pull and run the latest image
+docker pull pinyinjj/md-pdf-watermark:latest
+docker run -d \
+  --name md-pdf-watermark \
+  -p 8080:8080 \
+  -v md-pdf-watermark_output:/app/output \
+  -v md-pdf-watermark_watermarks:/app/watermarks \
+  -v md-pdf-watermark_temp_uploads:/app/temp_uploads \
+  pinyinjj/md-pdf-watermark:latest
 ```
 
 ### Manual Docker Commands
 
-If you prefer manual control:
+If you prefer manual control or local image building:
 
 ```bash
-# Build the image
-docker build -t md-pdf-watermark .
+# Optional: Build the image locally (if not pulling from a registry)
+# docker build -t md-pdf-watermark .
 
-# Run the container
+# Run the container from the pulled image (or locally built image)
 docker run -d \
   --name md-pdf-watermark \
   -p 8080:8080 \
-  -v $(pwd)/output:/app/output \
-  -v $(pwd)/watermarks:/app/watermarks \
-  -v $(pwd)/temp_uploads:/app/temp_uploads \
-  md-pdf-watermark
+  -v md-pdf-watermark_output:/app/output \
+  -v md-pdf-watermark_watermarks:/app/watermarks \
+  -v md-pdf-watermark_temp_uploads:/app/temp_uploads \
+  pinyinjj/md-pdf-watermark:latest
 ```
 
 ### Access Your Service
@@ -315,11 +321,16 @@ docker-compose logs
 
 ### 🔄 Updates & Maintenance
 
-**Update to latest version:**
-```bash
-docker-compose pull
-docker-compose up -d
-```
+# Update to latest version
+docker pull pinyinjj/md-pdf-watermark:latest
+docker stop md-pdf-watermark && docker rm md-pdf-watermark # Stop and remove old container
+docker run -d \
+  --name md-pdf-watermark \
+  -p 8080:8080 \
+  -v md-pdf-watermark_output:/app/output \
+  -v md-pdf-watermark_watermarks:/app/watermarks \
+  -v md-pdf-watermark_temp_uploads:/app/temp_uploads \
+  pinyinjj/md-pdf-watermark:latest
 
 **Reset everything:**
 ```bash
