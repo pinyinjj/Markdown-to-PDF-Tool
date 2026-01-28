@@ -101,24 +101,17 @@ def find_cjk_font() -> Optional[str]:
     Returns:
         Path to font file, or None if not found.
     """
-    # 1) Environment variable first
-    env_font = os.environ.get('WATERMARK_FONT')
-    if env_font and Path(env_font).exists():
-        return env_font
-    
-    # 2) Common font candidates
+
     for font_path_str in _get_font_candidates():
         font_path = Path(font_path_str)
         if font_path.exists():
             return str(font_path)
     
-    # 3) Fuzzy search in Windows fonts directory
     if platform.system() == 'Windows':
         result = _search_windows_fonts()
         if result:
             return result
     
-    # 4) Additional Linux search in common directories
     if platform.system() == 'Linux':
         font_dirs = [
             Path('/usr/share/fonts/truetype'),
@@ -235,9 +228,6 @@ def generate_text_watermark_image(
         print(f"✗ Failed to draw text: {e}")
         return None
     
-    # Ensure output directory exists
-    output_path_obj = Path(output_path)
-    output_path_obj.parent.mkdir(parents=True, exist_ok=True)
     
     # Save image
     try:
@@ -245,7 +235,7 @@ def generate_text_watermark_image(
         print("✓ " + t('text_watermark_image_generated', path=output_path, font=font_path or 'default'))
         return output_path
     except Exception as e:
-        print(f"✗ Failed to save watermark image: {e}")
+        print(f"✗ Failed to save watermark image to {output_path}: {type(e).__name__} - {e}")
         return None
 
 
@@ -281,7 +271,7 @@ def _watermark_text_from_config(config: dict) -> Optional[str]:
 def _output_path_for_text_config(config: dict) -> str:
     base_text_for_filename = _sanitize_filename(config.get("text", "watermark")) or "watermark"
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    out_dir = Path("watermarks")
+    out_dir = Path("output")
     out_dir.mkdir(parents=True, exist_ok=True)
     return str(out_dir / f"{base_text_for_filename}_{timestamp}.png")
 

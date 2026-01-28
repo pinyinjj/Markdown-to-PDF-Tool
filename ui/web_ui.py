@@ -317,7 +317,7 @@ class WebUI:
     def switch_language(self, lang: str):
         i18n.set_language(lang)
         self.current_language = lang
-        ui.notify(t('language_switched', lang=lang))
+        ui.notify(t('language_switched', lang=lang), position='top')
         ui.run_javascript('location.reload()')
     
     def update_file_list(self) -> None:
@@ -409,11 +409,11 @@ class WebUI:
     
     def download_file(self, file_path: Path) -> None:
         if not file_path.exists():
-            ui.notify(t('file_not_found'), type='negative')
+            ui.notify(t('file_not_found'), type='negative', position='top')
             return
 
         # Show loading notification and start download
-        ui.notify(t('starting_download', filename=file_path.name), type='info', duration=2)
+        ui.notify(t('starting_download', filename=file_path.name), type='info', duration=2, position='top')
 
         # Add a small delay to show the notification
         import asyncio
@@ -422,7 +422,7 @@ class WebUI:
             ui.download(str(file_path))
 
         asyncio.create_task(delayed_download())
-        ui.notify(t('downloading', filename=file_path.name))
+        ui.notify(t('downloading', filename=file_path.name), position='top')
 
     def delete_file(self, file_path: Path) -> None:
         try:
@@ -433,9 +433,9 @@ class WebUI:
                 self.processed_files.remove(file_path)
 
             self.update_file_list()
-            ui.notify(t('file_deleted', filename=file_path.name), type='positive')
+            ui.notify(t('file_deleted', filename=file_path.name), type='positive', position='top')
         except Exception as e:
-            ui.notify(t('delete_failed', error=str(e)), type='negative')
+            ui.notify(t('delete_failed', error=str(e)), type='negative', position='top')
 
     def clear_processed_files(self) -> None:
         """Clear all files in the output directory."""
@@ -461,9 +461,9 @@ class WebUI:
         self.update_file_list()
 
         if deleted_count > 0:
-            ui.notify(t('all_files_cleared'), type='positive')
+            ui.notify(t('all_files_cleared'), type='positive', position='top')
         else:
-            ui.notify(t('no_files_to_clear'), type='info')
+            ui.notify(t('no_files_to_clear'), type='info', position='top')
 
     def load_existing_output_files(self) -> None:
         """Load existing files from the output directory."""
@@ -563,7 +563,7 @@ class WebUI:
     async def handle_file_upload(self, e: UploadEventArguments):
         file_obj = getattr(e, 'file', None)
         if file_obj is None:
-            ui.notify(t('upload_failed'), type='negative')
+            ui.notify(t('upload_failed'), type='negative', position='top')
             return
 
         filename = getattr(file_obj, 'name', 'uploaded_file')
@@ -578,12 +578,12 @@ class WebUI:
 
         self.uploaded_files[filename] = str(save_path)
 
-        ui.notify(t('file_uploaded', filename=filename))
+        ui.notify(t('file_uploaded', filename=filename), position='top')
     
     async def handle_watermark_image_upload(self, e: UploadEventArguments):
         file_obj = getattr(e, 'file', None)
         if file_obj is None:
-            ui.notify(t('watermark_upload_failed'), type='negative')
+            ui.notify(t('watermark_upload_failed'), type='negative', position='top')
             return
 
         filename = getattr(file_obj, 'name', 'watermark')
@@ -597,7 +597,7 @@ class WebUI:
             f.write(data)
         
         self.watermark_image_path = str(save_path)
-        ui.notify(t('watermark_image_uploaded', filename=filename))
+        ui.notify(t('watermark_image_uploaded', filename=filename), position='top')
     
     async def generate_watermark_only(self):
         """Generate watermark image only (watermark_only mode)."""
@@ -606,7 +606,7 @@ class WebUI:
             try:
                 config = self.build_config()
             except ValueError as e:
-                ui.notify(str(e), type='negative')
+                ui.notify(str(e), type='negative', position='top')
                 return
             
             # Force text watermark type for watermark_only mode
@@ -618,34 +618,23 @@ class WebUI:
             watermark_image = setup_watermark_image(config)
             
             if watermark_image and Path(watermark_image).exists():
-                # Copy to output directory so it appears in the list and persists
-                import shutil
-                output_dir = Path('output')
-                output_dir.mkdir(exist_ok=True)
-                
-                source_path = Path(watermark_image)
-                destination_path = output_dir / source_path.name
-                
-                try:
-                    shutil.copy2(source_path, destination_path)
-                    
-                    # Update processed files list
-                    if destination_path not in self.processed_files:
-                        self.processed_files.insert(0, destination_path)
-                    
-                    # Mark as completed
-                    self.file_processing_status[destination_path] = 'completed'
-                    
-                    # Update UI
-                    self.update_file_list()
-                    
-                    ui.notify(t('watermark_generated_successfully'), type='positive')
-                except Exception as e:
-                    ui.notify(t('error', error=f"Failed to save to output: {e}"), type='negative')
+                destination_path = Path(watermark_image)
+
+                # Update processed files list
+                if destination_path not in self.processed_files:
+                    self.processed_files.insert(0, destination_path)
+
+                # Mark as completed
+                self.file_processing_status[destination_path] = 'completed'
+
+                # Update UI
+                self.update_file_list()
+
+                ui.notify(t('watermark_generated_successfully'), type='positive', position='top')
             else:
-                ui.notify(t('watermark_generation_failed'), type='negative')
+                ui.notify(t('watermark_generation_failed'), type='negative', position='top')
         except Exception as e:
-            ui.notify(t('error', error=str(e)), type='negative')
+            ui.notify(t('error', error=str(e)), type='negative', position='top')
     
     def build_config(self) -> Dict[str, Any]:
         config = {
@@ -701,13 +690,13 @@ class WebUI:
     async def process_files(self):
         try:
             if not self.uploaded_files and self.mode_radio.value != 'watermark_only':
-                ui.notify(t('please_upload_files_first'), type='negative')
+                ui.notify(t('please_upload_files_first'), type='negative', position='top')
                 return
             
             try:
                 self.config = self.build_config()
             except ValueError as e:
-                ui.notify(str(e), type='negative')
+                ui.notify(str(e), type='negative', position='top')
                 return
 
             selected_paths: List[Path] = [
@@ -729,7 +718,7 @@ class WebUI:
                 if non_pdf_files:
                     found_formats = sorted(list(set(p.suffix.lower() for p in non_pdf_files)))
                     formats_str = ', '.join(found_formats)
-                    ui.notify(t('non_pdf_files_in_pdf_mode_error', formats_found=formats_str), type='negative')
+                    ui.notify(t('non_pdf_files_in_pdf_mode_error', formats_found=formats_str), type='negative', position='top')
                     self.process_button.enable()
                     return
 
@@ -791,7 +780,7 @@ class WebUI:
                 final_md_files = [p for p in selected_md_files if not target_map.get(p, Path('')).exists()]
                 
                 if not final_pdf_files and not final_md_files:
-                    ui.notify(t('no_files_to_process'), type='warning')
+                    ui.notify(t('no_files_to_process'), type='warning', position='top')
                     self.process_button.enable()
                     return
             else:
@@ -846,15 +835,15 @@ class WebUI:
                 if self.config['mode'] == 'watermark_only':
                     watermark_image = setup_watermark_image(self.config)
                     if watermark_image:
-                        ui.notify(t('watermark_generated_successfully'), type='positive')
+                        ui.notify(t('watermark_generated_successfully'), type='positive', position='top')
                         success = True
                     else:
-                        ui.notify(t('watermark_generation_failed'), type='negative')
+                        ui.notify(t('watermark_generation_failed'), type='negative', position='top')
                 
                 else:
                     watermark_image = setup_watermark_image(self.config)
                     if not watermark_image:
-                        ui.notify(t('watermark_image_not_found'), type='negative')
+                        ui.notify(t('watermark_image_not_found'), type='negative', position='top')
                         return
                     
                     # Process files one by one for real-time UI updates
@@ -885,11 +874,11 @@ class WebUI:
                                 **config_kwargs
                             )
                         else:
-                            ui.notify(t('no_files_found'), type='warning')
+                            ui.notify(t('no_files_found'), type='warning', position='top')
                             return
                     else:
                         if not final_md_files:
-                            ui.notify(t('no_markdown_files_selected'), type='warning')
+                            ui.notify(t('no_markdown_files_selected'), type='warning', position='top')
                             return
                         # Filter out keys that conflict with positional arguments
                         config_kwargs = {k: v for k, v in self.config.items() if k not in ['mode']}
@@ -916,12 +905,12 @@ class WebUI:
                     self.update_file_list()
                 
                 if success:
-                    ui.notify(t('processing_successful'), type='positive')
+                    ui.notify(t('processing_successful'), type='positive', position='top')
                 else:
-                    ui.notify(t('processing_failed'), type='negative')
+                    ui.notify(t('processing_failed'), type='negative', position='top')
             
             except Exception as e:
-                ui.notify(t('error', error=str(e)), type='negative')
+                ui.notify(t('error', error=str(e)), type='negative', position='top')
                 success = False
             
             finally:
@@ -960,7 +949,7 @@ class WebUI:
                     self.recreate_upload_widget()
         
         except Exception as e:
-            ui.notify(t('configuration_error', error=str(e)), type='negative')
+            ui.notify(t('configuration_error', error=str(e)), type='negative', position='top')
             self.process_button.enable()
 
     async def process_single_file(self, file_path: Path, mode: str, output_file: Path, watermark_image: str, **kwargs) -> bool:

@@ -16,17 +16,36 @@
 
 适用：README/设计与架构（Mermaid）/API与代码文档、技术博客归档、项目报告与教学讲义；支持批量加水印或生成纯净PDF，便于团队分发协作。
 
-## 快速开始
+## 🚀 快速开始
 
-### 运行项目
+**一行命令启动服务：**
 
 ```bash
-git clone https://github.com/pinyinjj/Markdown-to-PDF-Tool.git
-cd md-pdf-watermark
-python main.py
+docker run -d --name md-pdf-watermark -p 8080:8080 -v "$(pwd)/output:/app/output" ghcr.io/pinyinjj/md-pdf-watermark:latest
 ```
 
-程序会引导您选择操作模式：
+**访问服务：** 在浏览器中打开：**http://localhost:8080**
+
+> **提示**：如果拉取镜像时提示 "denied"，请检查 GitHub Package 设置，确保镜像已设为 **Public**（公开）。
+
+---
+
+## 🛠️ 安装与部署
+
+### 方法 1：使用 Docker (推荐)
+
+这是最快的方法，自动拉取镜像并启动 Web 界面。
+
+```bash
+docker run -d \
+  --name md-pdf-watermark \
+  -p 8080:8080 \
+  -v "$(pwd)/output:/app/output" \
+  -v "$(pwd)/watermarks:/app/watermarks" \
+  ghcr.io/pinyinjj/md-pdf-watermark:latest
+```
+
+### 方法 2：本地运行
 
 **1. 处理PDF文件（添加水印）**
 - 为现有PDF文件添加水印
