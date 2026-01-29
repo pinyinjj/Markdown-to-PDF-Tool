@@ -4,6 +4,12 @@ __pycache__/
 *$py.class
 *.so
 .Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Virtual environments
 .venv/
@@ -16,19 +22,23 @@ ENV/
 .idea/
 *.swp
 *.swo
+*.sublime-*
 
 # Git
 .git/
 .gitignore
+.github/
 
 # Docker
 Dockerfile
 .dockerignore
 docker-compose.yml
+*.dockerfile
 
 # Documentation
 *.md
 !README.md
+!README.zh.md
 
 # Output files (will be mounted as volume)
 output/*
@@ -44,10 +54,13 @@ watermarks/*
 
 # Logs
 *.log
+*.log.*
 
 # OS files
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
 
 # Environment files
 .env
@@ -57,3 +70,22 @@ Thumbs.db
 # Playwright
 playwright-report/
 playwright/.cache/
+.ms-playwright/
+
+# Test files
+test_*.py
+*_test.py
+tests/
+.pytest_cache/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# Other
+*.bak
+*.tmp
+*.temp
+.cache/

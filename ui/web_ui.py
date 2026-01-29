@@ -10,11 +10,7 @@ from nicegui.events import UploadEventArguments
 
 from i18n import t, i18n
 from config import WatermarkConfig
-from core import (
-    setup_watermark_image,
-    process_pdf_files,
-    process_markdown_files,
-)
+from core import setup_watermark_image
 from core.pdf_processor import add_watermark_to_file
 from core.markdown_processor import extract_h1_title
 
@@ -412,17 +408,10 @@ class WebUI:
             ui.notify(t('file_not_found'), type='negative', position='top')
             return
 
-        # Show loading notification and start download
-        ui.notify(t('starting_download', filename=file_path.name), type='info', duration=2, position='top')
+        # 提示用户
+        ui.notify(t('starting_download', filename=file_path.name), type='info', position='top')
 
-        # Add a small delay to show the notification
-        import asyncio
-        async def delayed_download():
-            await asyncio.sleep(0.5)  # Small delay to show notification
-            ui.download(str(file_path))
-
-        asyncio.create_task(delayed_download())
-        ui.notify(t('downloading', filename=file_path.name), position='top')
+        ui.download(str(file_path.resolve()))
 
     def delete_file(self, file_path: Path) -> None:
         try:
@@ -598,7 +587,32 @@ class WebUI:
         
         self.watermark_image_path = str(save_path)
         ui.notify(t('watermark_image_uploaded', filename=filename), position='top')
-    
+
+    def _generate_watermark_from_config(self, config: Dict[str, Any]) -> Optional[Path]:
+        """
+        Unified implementation for watermark_only mode to generate a watermark image
+        and update the processed files list / UI.
+        """
+        watermark_image = setup_watermark_image(config)
+        if not watermark_image:
+            return None
+
+        watermark_path = Path(watermark_image)
+        if not watermark_path.exists():
+            return None
+
+        # Update processed files list
+        if watermark_path in self.processed_files:
+            self.processed_files.remove(watermark_path)
+        self.processed_files.insert(0, watermark_path)
+
+        # Mark as completed
+        self.file_processing_status[watermark_path] = 'completed'
+
+        # Update UI
+        self.update_file_list()
+        return watermark_path
+
     async def generate_watermark_only(self):
         """Generate watermark image only (watermark_only mode)."""
         try:
@@ -608,28 +622,16 @@ class WebUI:
             except ValueError as e:
                 ui.notify(str(e), type='negative', position='top')
                 return
-            
-            # Force text watermark type for watermark_only mode
+
+            # Ensure watermark_only mode uses text watermark configuration
+            config['mode'] = 'watermark_only'
             config['type'] = 'text'
             config['text'] = self.watermark_text_input.value or 'Watermark'
             config['add_date'] = self.add_date_checkbox.value
-            
-            # Generate watermark
-            watermark_image = setup_watermark_image(config)
-            
-            if watermark_image and Path(watermark_image).exists():
-                destination_path = Path(watermark_image)
 
-                # Update processed files list
-                if destination_path not in self.processed_files:
-                    self.processed_files.insert(0, destination_path)
-
-                # Mark as completed
-                self.file_processing_status[destination_path] = 'completed'
-
-                # Update UI
-                self.update_file_list()
-
+            # Generate watermark via unified helper
+            watermark_path = self._generate_watermark_from_config(config)
+            if watermark_path:
                 ui.notify(t('watermark_generated_successfully'), type='positive', position='top')
             else:
                 ui.notify(t('watermark_generation_failed'), type='negative', position='top')
@@ -833,13 +835,14 @@ class WebUI:
             
             try:
                 if self.config['mode'] == 'watermark_only':
-                    watermark_image = setup_watermark_image(self.config)
-                    if watermark_image:
+                    # Use unified watermark generation helper for watermark_only mode
+                    watermark_path = self._generate_watermark_from_config(self.config)
+                    if watermark_path:
                         ui.notify(t('watermark_generated_successfully'), type='positive', position='top')
                         success = True
                     else:
                         ui.notify(t('watermark_generation_failed'), type='negative', position='top')
-                
+
                 else:
                     watermark_image = setup_watermark_image(self.config)
                     if not watermark_image:

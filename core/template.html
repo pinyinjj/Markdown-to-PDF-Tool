@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <base href="__VAR_BASE_HREF__">
+    <title>__VAR_TITLE__</title>
+    <!-- CSS 资源 -->
+    <link rel="stylesheet" href="__VAR_CSS_GITHUB__">
+    <link rel="stylesheet" href="__VAR_CSS_HLJS__">
+    <link rel="stylesheet" href="__VAR_CSS_KATEX__">
+
+    <style>
+        /* 注入本地字体 face */
+        __VAR_FONT_CSS__
+
+        @page { size: A4; margin: 18mm; }
+        body {
+            font-family: __VAR_FONT_FAMILY__;
+            line-height: 1.6;
+        }
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; }
+        pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
+        .mermaid { text-align: center; margin: 12px 0; }
+        h1, h2, h3 { page-break-after: avoid; }
+        img { max-width: 100%; }
+        
+        .markdown-body ul { list-style-type: disc; padding-left: 2em; }
+        .markdown-body ul ul { list-style-type: circle; }
+        .markdown-body ol { list-style-type: decimal; padding-left: 2em; }
+    </style>
+
+    <!-- JS 库和插件 -->
+    __VAR_SCRIPT_TAGS__
+</head>
+<body>
+    <div id="md-root" class="markdown-body"></div>
+
+    <script>
+    function renderMarkdown() {
+        try {
+            console.log("Starting rendering...");
+            const rootElement = document.getElementById('md-root');
+            if (!rootElement) return;
+
+            // 显式检查 markdownit 是否定义
+            if (typeof markdownit === 'undefined') {
+                throw new Error("markdownit library is not loaded. Check script tags.");
+            }
+
+            const md = markdownit({
+              html: true,
+              linkify: true,
+              typographer: true,
+              highlight: function (str, lang) {
+                if (lang && typeof hljs !== 'undefined' && hljs.getLanguage(lang)) {
+                  try {
+                    return hljs.highlight(str, { language: lang }).value;
+                  } catch (__) {}
+                }
+                return '';
+              }
+            });
+
+            // 插件加载
+            if (typeof markdownItAnchor !== 'undefined') {
+                md.use(markdownItAnchor, { level: [1, 2, 3, 4, 5, 6] });
+            }
+
+            const tocPlugin = window.markdownItTocDoneRight || window.markdownItTableOfContents;
+            if (tocPlugin) md.use(tocPlugin);
+
+            const kt = window.markdownitKatex || window.markdownItKatex || window['markdown-it-katex'];
+            if (kt) md.use(kt);
+
+            const tl = window.markdownitTaskLists || window.markdownItTaskLists;
+            if (tl) md.use(tl);
+
+            if (typeof markdownItEmoji !== 'undefined') md.use(markdownItEmoji);
+
+            // 源码注入
+            const mdSource = __VAR_MD_SOURCE__;
+            rootElement.innerHTML = md.render(mdSource);
+            
+            // 后处理
+            if (typeof renderMathInElement === 'function') {
+              renderMathInElement(document.body, { 
+                delimiters: [
+                    {left: '$$', right: '$$', display: true}, 
+                    {left: '$', right: '$', display: false}
+                ] 
+              });
+            }
+
+            if (typeof mermaid !== 'undefined') {
+              mermaid.init();
+            }
+            console.log("Rendering completed.");
+        } catch (err) {
+            console.error("Rendering error:", err);
+            document.body.innerHTML = "JS_EXECUTION_ERROR";
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', renderMarkdown);
+    } else {
+        renderMarkdown();
+    }
+    </script>
+</body>
+</html>

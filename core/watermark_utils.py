@@ -21,18 +21,25 @@ from config import WatermarkConfig
 
 def find_watermark_image() -> Optional[str]:
     """
-    Select a watermark image (PNG/JPG/SVG) from the `watermarks/` directory.
+    Select a watermark image (PNG/JPG/SVG) from the `watermarks/` or `assets/` directory.
 
     Returns:
         Optional[str]: First image file path found, or None if not found
     """
     candidates: List[str] = []
-    base = Path("watermarks")
-    if not base.exists():
-        return None
+    # Check both user watermarks dir and system assets dir
+    search_dirs = [Path("watermarks"), Path("assets")]
+    
     exts = ["*.png", "*.PNG", "*.jpg", "*.jpeg", "*.svg"]
-    for ext in exts:
-        candidates.extend([str(p) for p in base.glob(ext)])
+    
+    for base in search_dirs:
+        if not base.exists():
+            continue
+        for ext in exts:
+            # Add found images to candidates
+            found = list(base.glob(ext))
+            candidates.extend([str(p) for p in found])
+            
     return candidates[0] if candidates else None
 
 
@@ -41,8 +48,47 @@ def get_today_str() -> str:
     return date.today().isoformat()
 
 
-def _get_font_candidates() -> List[str]:
-    """Get candidate paths for common CJK fonts."""
+def _get_local_font_candidates() -> List[str]:
+    """
+    Search for fonts in local assets directory (project root/assets).
+    This allows for self-contained execution (e.g. in Docker) without installing system fonts.
+    """
+    candidates = []
+    # Check paths relative to CWD and script location
+    possible_roots = [
+        Path("assets"), 
+        Path(__file__).parent.parent / "assets"
+    ]
+    
+    checked_paths = set()
+    
+    for root in possible_roots:
+        if not root.exists():
+            continue
+            
+        # Search in assets/ and assets/fonts/
+        search_dirs = [root, root / "fonts"]
+        
+        for d in search_dirs:
+            resolved_d = d.resolve()
+            if not d.exists() or resolved_d in checked_paths:
+                continue
+            
+            checked_paths.add(resolved_d)
+            
+            # Look for font files
+            for ext in ["*.ttc", "*.ttf", "*.otf"]:
+                for font_path in d.glob(ext):
+                    # Skip KaTeX fonts (math symbols) as they aren't suitable for general text
+                    if "KaTeX" in font_path.name:
+                        continue
+                    candidates.append(str(font_path.resolve()))
+                    
+    return candidates
+
+
+def _get_system_font_candidates() -> List[str]:
+    """Get candidate paths for common system CJK fonts."""
     return [
         # Windows common CJK fonts
         r"C:\Windows\Fonts\msyh.ttc",
@@ -67,6 +113,8 @@ def _get_font_candidates() -> List[str]:
         r"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
         r"/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
         r"/usr/local/share/fonts/NotoSansCJK-Regular.ttc",
+        # Common Docker/Debian location
+        r"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     ]
 
 
@@ -97,16 +145,22 @@ def _search_windows_fonts() -> Optional[str]:
 def find_cjk_font() -> Optional[str]:
     """
     Find a suitable CJK (Chinese, Japanese, Korean) font on the system.
+    Prioritizes fonts found in the local 'assets' directory.
     
     Returns:
         Path to font file, or None if not found.
     """
+    # 1. Check local assets first (Preferred)
+    for font_path in _get_local_font_candidates():
+        return font_path
 
-    for font_path_str in _get_font_candidates():
+    # 2. Check known system paths
+    for font_path_str in _get_system_font_candidates():
         font_path = Path(font_path_str)
         if font_path.exists():
             return str(font_path)
     
+    # 3. Platform specific fuzzy search
     if platform.system() == 'Windows':
         result = _search_windows_fonts()
         if result:
