@@ -62,7 +62,7 @@ EN: dict = {
     'missing_dependency_pillow': "Missing dependency: pillow. Please run: pip install pillow",
     'missing_dependency_markdown': "Missing dependency: markdown. Please run: pip install markdown",
     'missing_dependency_playwright': "Missing dependency: playwright. Please run: pip install playwright && playwright install",
-    'chinese_font_not_found': 'No suitable CJK font found. Set WATERMARK_FONT to a local *.ttf/*.ttc or install a CJK font.',
+    'chinese_font_not_found': 'No suitable CJK font found in the assets/fonts directory.',
     'open_font_failed': 'Failed to open font: {font} - {error}',
     'text_watermark_image_generated': 'Text watermark image generated: {path} Using font: {font}',
     'watermark_cli_not_found': 'Watermark CLI tool not found',

@@ -5,6 +5,8 @@ Utilities for watermark image discovery, generation, and setup.
 import os
 import platform
 from pathlib import Path
+import tempfile
+import shutil # Added for shutil.move
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime
 
@@ -87,125 +89,48 @@ def _get_local_font_candidates() -> List[str]:
     return candidates
 
 
-def _get_system_font_candidates() -> List[str]:
-    """Get candidate paths for common system CJK fonts."""
-    return [
-        # Windows common CJK fonts
-        r"C:\Windows\Fonts\msyh.ttc",
-        r"C:\Windows\Fonts\msyhbd.ttc",
-        r"C:\Windows\Fonts\msyhl.ttc",
-        r"C:\Windows\Fonts\simhei.ttf",
-        r"C:\Windows\Fonts\simsun.ttc",
-        r"C:\Windows\Fonts\simkai.ttf",
-        r"C:\Windows\Fonts\simfang.ttf",
-        r"C:\Windows\Fonts\SourceHanSansCN-Normal.otf",
-        r"C:\Windows\Fonts\NotoSansCJK-Regular.ttc",
-        r"C:\Windows\Fonts\AlibabaPuHuiTi-2-55-Regular.ttf",
-        r"C:\Windows\Fonts\HarmonyOS_Sans_SC_Regular.ttf",
-        # macOS
-        r"/System/Library/Fonts/PingFang.ttc",
-        r"/System/Library/Fonts/Hiragino Sans GB W3.ttc",
-        r"/Library/Fonts/Arial Unicode.ttf",
-        # Linux common install paths
-        r"/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        r"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        r"/usr/share/fonts/opentype/noto/NotoSansCJKSC-Regular.otf",
-        r"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-        r"/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-        r"/usr/local/share/fonts/NotoSansCJK-Regular.ttc",
-        # Common Docker/Debian location
-        r"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    ]
-
-
-def _search_windows_fonts() -> Optional[str]:
-    """Fuzzy search for CJK fonts in the Windows fonts directory."""
-    win_fonts = r"C:\Windows\Fonts"
-    if not Path(win_fonts).is_dir():
-        return None
-
-    prefer_keys = [
-        "msyh", "simhei", "simsun", "sourcehansans", "notosanscjk",
-        "alibabapuhuiti", "harmonyos",
-    ]
-
-    try:
-        for fname in os.listdir(win_fonts):
-            lower = fname.lower()
-            if any(k in lower for k in prefer_keys):
-                full = Path(win_fonts) / fname
-                if full.is_file():
-                    return str(full)
-    except Exception:
-        pass
-
-    return None
-
-
 def find_cjk_font() -> Optional[str]:
     """
-    Find a suitable CJK (Chinese, Japanese, Korean) font on the system.
-    Prioritizes fonts found in the local 'assets' directory.
-    
-    Returns:
-        Path to font file, or None if not found.
+    Find a suitable CJK (Chinese, Japanese, Korean) font in the local 'assets' directory.
+    It prioritizes Simplified Chinese fonts to prevent garbled text issues.
     """
-    # 1. Check local assets first (Preferred)
-    for font_path in _get_local_font_candidates():
-        return font_path
+    candidates = _get_local_font_candidates()
+    
+    # Prioritize Simplified Chinese fonts to ensure correct character rendering
+    # Switch the order to test the mono font first
+    preferred_fonts = ['NotoSansMonoCJKsc-VF.otf', 'NotoSansSC-Regular.otf']
+    
+    for font_name in preferred_fonts:
+        for candidate_path in candidates:
+            if font_name in candidate_path:
+                return candidate_path
 
-    # 2. Check known system paths
-    for font_path_str in _get_system_font_candidates():
-        font_path = Path(font_path_str)
-        if font_path.exists():
-            return str(font_path)
-    
-    # 3. Platform specific fuzzy search
-    if platform.system() == 'Windows':
-        result = _search_windows_fonts()
-        if result:
-            return result
-    
-    if platform.system() == 'Linux':
-        font_dirs = [
-            Path('/usr/share/fonts/truetype'),
-            Path('/usr/share/fonts/opentype'),
-            Path('/usr/local/share/fonts'),
-            Path.home() / '.fonts',
-            Path.home() / '.local/share/fonts',
-        ]
-        for font_dir in font_dirs:
-            if font_dir.exists():
-                # Search for Noto CJK fonts
-                for pattern in ['**/NotoSansCJK*.ttc', '**/NotoSansCJK*.otf', '**/wqy*.ttc']:
-                    for font_path in font_dir.glob(pattern):
-                        if font_path.is_file():
-                            return str(font_path)
-    
+    # If no preferred font is found, return the first available one as a fallback
+    if candidates:
+        return candidates[0]
+        
     return None
 
 
 def generate_text_watermark_image(
     text: str,
-    output_path: str,
     font_size: int = None,
     text_color: tuple = None,
     padding: int = None,
     add_date: bool = False
 ) -> Optional[str]:
     """
-    Generate a watermark image from text.
+    Generate a watermark image from text into a temporary file.
     
     Args:
         text: Watermark text
-        output_path: Path to save the generated image
         font_size: Font size (defaults to WatermarkConfig.FONT_SIZE)
         text_color: Text color as RGBA tuple (defaults to WatermarkConfig.TEXT_COLOR)
         padding: Padding around text (defaults to WatermarkConfig.PADDING)
         add_date: Whether to add current date to the text
     
     Returns:
-        Path to generated image, or None if generation failed
+        Path to generated temporary image, or None if generation failed
     """
     if Image is None:
         print("✗ " + t('missing_dependency_pillow'))
@@ -283,13 +208,20 @@ def generate_text_watermark_image(
         return None
     
     
-    # Save image
+    # Save image to a temporary file
     try:
-        img.save(output_path, 'PNG')
-        print("✓ " + t('text_watermark_image_generated', path=output_path, font=font_path or 'default'))
-        return output_path
+        # Use a temporary file to store the generated watermark image
+        temp_dir = Path("/home/yj/.gemini/tmp/c2327b82b93ac09a25e74aba6385271e48c34b57ad6a55827b04d6cf72c865e7") # Using project temp directory
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir=temp_dir)
+        temp_output_path = temp_file.name
+        temp_file.close() # Close the file handle as img.save will open it again
+
+        img.save(temp_output_path, 'PNG')
+        print("✓ " + t('text_watermark_image_generated', path=temp_output_path, font=font_path or 'default'))
+        return temp_output_path
     except Exception as e:
-        print(f"✗ Failed to save watermark image to {output_path}: {type(e).__name__} - {e}")
+        print(f"✗ Failed to save temporary watermark image: {type(e).__name__} - {e}")
         return None
 
 
@@ -330,20 +262,33 @@ def _output_path_for_text_config(config: dict) -> str:
     return str(out_dir / f"{base_text_for_filename}_{timestamp}.png")
 
 
-def _generate_text_or_fallback(watermark_text: str, config: dict) -> Optional[str]:
-    out_path = _output_path_for_text_config(config)
-    generated = generate_text_watermark_image(
+def _generate_text_or_fallback(watermark_text: str, config: dict, save_to_output: bool) -> Optional[str]:
+    generated_temp_path = generate_text_watermark_image(
         watermark_text,
-        out_path,
         font_size=config.get("font_size", WatermarkConfig.FONT_SIZE),
         text_color=config.get("text_color", WatermarkConfig.TEXT_COLOR),
         padding=config.get("padding", WatermarkConfig.PADDING),
         add_date=False  # Date already added in _watermark_text_from_config
     )
-    return generated or find_watermark_image()
+    
+    if generated_temp_path and save_to_output:
+        final_output_path = _output_path_for_text_config(config)
+        try:
+            shutil.move(generated_temp_path, final_output_path)
+            return final_output_path
+        except Exception as e:
+            print(f"✗ Failed to move temporary watermark to final output: {e}")
+            # Ensure temporary file is removed if move fails
+            if Path(generated_temp_path).exists():
+                os.remove(generated_temp_path)
+            return None
+    elif generated_temp_path:
+        return generated_temp_path
+        
+    return find_watermark_image()
 
 
-def setup_watermark_image(config: Dict[str, Any]) -> Optional[str]:
+def setup_watermark_image(config: Dict[str, Any], save_to_output: bool = False) -> Optional[str]:
     """
     Setup watermark image based on configuration.
     
@@ -352,6 +297,8 @@ def setup_watermark_image(config: Dict[str, Any]) -> Optional[str]:
     
     Args:
         config: Configuration dictionary with 'type' key and related settings
+        save_to_output: If True, and a text watermark is generated, it will be saved
+                        to the 'output' directory. Otherwise, a temporary file path is returned.
     
     Returns:
         Path to watermark image, or None if setup failed
@@ -367,7 +314,7 @@ def setup_watermark_image(config: Dict[str, Any]) -> Optional[str]:
     # Try text watermark generation
     watermark_text = _watermark_text_from_config(config)
     if watermark_text:
-        return _generate_text_or_fallback(watermark_text, config)
+        return _generate_text_or_fallback(watermark_text, config, save_to_output)
 
     # Fallback to finding existing watermark image
     return find_watermark_image()

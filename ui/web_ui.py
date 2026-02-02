@@ -21,13 +21,21 @@ def cleanup_generated_watermark(watermark_image: Optional[str], config: dict) ->
     
     watermark_path = Path(watermark_image)
     
-    if watermark_path.exists() and watermark_path.parent.name == "watermarks":
-        if config.get("type") == "text" or (config.get("type") != "image" and not config.get("image")):
-            try:
-                watermark_path.unlink()
-                print(f"✓ Cleaned up generated watermark: {watermark_image}")
-            except Exception as e:
-                print(f"⚠ Warning: Failed to delete watermark file {watermark_image}: {e}")
+    # Only delete if it's a generated text watermark (config type is text, or not image and no image path)
+    # AND it's a temporary file (i.e., not explicitly saved to the output directory by the user)
+    # Check if the file is NOT in the output directory and is NOT a user-provided image path
+    is_generated_text_watermark = (
+        config.get("type") == "text" or
+        (config.get("type") != "image" and not config.get("image"))
+    )
+    
+    # If it's a generated text watermark and its parent is not 'output' (meaning it's a temporary file)
+    if watermark_path.exists() and is_generated_text_watermark and watermark_path.parent != Path("output").resolve():
+        try:
+            watermark_path.unlink()
+            print(f"✓ Cleaned up generated temporary watermark: {watermark_image}")
+        except Exception as e:
+            print(f"⚠ Warning: Failed to delete temporary watermark file {watermark_image}: {e}")
 
 
 class WebUI:
@@ -593,7 +601,7 @@ class WebUI:
         Unified implementation for watermark_only mode to generate a watermark image
         and update the processed files list / UI.
         """
-        watermark_image = setup_watermark_image(config)
+        watermark_image = setup_watermark_image(config, save_to_output=True)
         if not watermark_image:
             return None
 
@@ -844,7 +852,7 @@ class WebUI:
                         ui.notify(t('watermark_generation_failed'), type='negative', position='top')
 
                 else:
-                    watermark_image = setup_watermark_image(self.config)
+                    watermark_image = setup_watermark_image(self.config, save_to_output=False)
                     if not watermark_image:
                         ui.notify(t('watermark_image_not_found'), type='negative', position='top')
                         return

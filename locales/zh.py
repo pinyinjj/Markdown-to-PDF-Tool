@@ -62,7 +62,7 @@ ZH: dict = {
     'missing_dependency_pillow': '缺少依赖: pillow。请先运行: pip install pillow',
     'missing_dependency_markdown': '缺少依赖: markdown。请先运行: pip install markdown',
     'missing_dependency_playwright': '缺少依赖: playwright。请先运行: pip install playwright && playwright install',
-    'chinese_font_not_found': '未找到可用中文字体。请设置环境变量 WATERMARK_FONT 指向本地 *.ttf/*.ttc，或安装中文字体。',
+    'chinese_font_not_found': '在 assets/fonts 目录中未找到可用的中文字体。',
     'open_font_failed': '打开字体失败: {font} - {error}',
     'text_watermark_image_generated': '文本水印图片已生成: {path} 使用字体: {font}',
     'watermark_cli_not_found': 'Watermark CLI工具未找到',
