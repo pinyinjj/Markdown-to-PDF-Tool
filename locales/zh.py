@@ -134,4 +134,5 @@ ZH: dict = {
     'language_switched': '语言已切换为 {lang}',
     'non_pdf_files_in_pdf_mode_error': '错误的输入文件格式 ({formats_found})，预期输入为 .pdf。请移除或切换到其他模式。',
     'total_files_count': '{count} 个文件',
+    'total_file_count': '{count} 个文件',
 }

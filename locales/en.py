@@ -88,6 +88,7 @@ EN: dict = {
     'language_set_to': 'Language set to: {lang}',
 
     # Web UI specific
+
     'filter_docsy_front_matter': 'Filter Docsy front matter',
     'rename_pdf_by_h1_title': 'Rename PDF by H1 title (# Title)',
     'select_files': 'Select Files',
@@ -134,4 +135,6 @@ EN: dict = {
     'language_switched': 'Language switched to {lang}',
     'non_pdf_files_in_pdf_mode_error': 'Invalid input file format ({formats_found}), expected input is .pdf. Please remove or switch to another mode.',
     'total_files_count': '{count} files',
+    'total_file_count': '{count} file',
+
 }

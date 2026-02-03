@@ -62,6 +62,8 @@ def _get_local_font_candidates() -> List[str]:
         Path(__file__).parent.parent / "assets"
     ]
     
+    print(f"DEBUG: Searching for local fonts in possible roots: {possible_roots}")
+    
     checked_paths = set()
     
     for root in possible_roots:
@@ -77,6 +79,7 @@ def _get_local_font_candidates() -> List[str]:
                 continue
             
             checked_paths.add(resolved_d)
+            print(f"DEBUG: Searching in directory: {resolved_d}")
             
             # Look for font files
             for ext in ["*.ttc", "*.ttf", "*.otf"]:
@@ -84,6 +87,7 @@ def _get_local_font_candidates() -> List[str]:
                     # Skip KaTeX fonts (math symbols) as they aren't suitable for general text
                     if "KaTeX" in font_path.name:
                         continue
+                    print(f"DEBUG: Found font candidate: {font_path.resolve()}")
                     candidates.append(str(font_path.resolve()))
                     
     return candidates
@@ -95,20 +99,25 @@ def find_cjk_font() -> Optional[str]:
     It prioritizes Simplified Chinese fonts to prevent garbled text issues.
     """
     candidates = _get_local_font_candidates()
+    print(f"DEBUG: CJK font candidates: {candidates}")
     
     # Prioritize Simplified Chinese fonts to ensure correct character rendering
     # Switch the order to test the mono font first
     preferred_fonts = ['NotoSansMonoCJKsc-VF.otf', 'NotoSansSC-Regular.otf']
+    print(f"DEBUG: Prioritizing preferred CJK fonts: {preferred_fonts}")
     
     for font_name in preferred_fonts:
         for candidate_path in candidates:
             if font_name in candidate_path:
+                print(f"DEBUG: Selected preferred CJK font: {candidate_path}")
                 return candidate_path
 
     # If no preferred font is found, return the first available one as a fallback
     if candidates:
+        print(f"DEBUG: No preferred CJK font found, falling back to first candidate: {candidates[0]}")
         return candidates[0]
         
+    print(f"DEBUG: No CJK font candidates found.")
     return None
 
 
@@ -148,16 +157,20 @@ def generate_text_watermark_image(
     
     # Find font
     font_path = find_cjk_font()
+    print(f"DEBUG: Font path returned by find_cjk_font: {font_path}")
     font = None
     
     if font_path:
         try:
+            print(f"DEBUG: Attempting to load font: {font_path} with size {font_size}")
             font = ImageFont.truetype(font_path, font_size)
         except Exception as e:
+            print(f"ERROR: Failed to load font {font_path}: {e}")
             print("⚠ " + t('open_font_failed', font=font_path, error=str(e)))
     
     # Fallback to default font if CJK font not found or failed to load
     if font is None:
+        print("DEBUG: Falling back to default font.")
         print("⚠ " + t('chinese_font_not_found'))
         try:
             font = ImageFont.load_default()
@@ -165,6 +178,7 @@ def generate_text_watermark_image(
             font = None
     
     if font is None:
+        print("ERROR: Failed to load any font.")
         print("✗ Failed to load any font")
         return None
     

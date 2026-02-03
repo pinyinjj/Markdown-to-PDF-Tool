@@ -9,17 +9,14 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # Mount input directory (optional, for persistent input files)
       - ./input:/app/input
-      # Mount output directory (persistent output files)
       - ./output:/app/output
-      # Mount temporary upload directory
       - ./temp_uploads:/app/temp_uploads
-      # Mount watermarks directory (persistent generated watermarks)
       - ./watermarks:/app/watermarks
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
+    # 删除了 command 这一行，直接使用镜像内定义的默认指令
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080')"]
       interval: 30s
