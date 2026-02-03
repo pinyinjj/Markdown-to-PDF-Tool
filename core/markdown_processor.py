@@ -9,7 +9,8 @@ import threading
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict
 
-from i18n import t
+# 假设这些模块已在你的项目中定义
+from i18n import t 
 from config import WatermarkConfig
 from .pdf_processor import add_watermark_to_file
 
@@ -38,15 +39,12 @@ ASSETS_MAPPING: Dict[str, str] = {
 
 
 def get_asset_url(key: str) -> str:
-    """
-    获取资产 URL。强制使用本地 assets 目录下的文件。
-    """
+    """获取资产 URL。强制使用本地 assets 目录下的文件。"""
     filename = ASSETS_MAPPING.get(key, "")
     if not filename:
         return ""
         
     local_asset = Path("assets") / filename
-    
     if not local_asset.exists():
         print(f"✗ Critical Error: Missing local asset: {filename}. Please run download_assets.py.")
         return ""
@@ -56,26 +54,54 @@ def get_asset_url(key: str) -> str:
 
 def get_custom_font_css() -> str:
     """
-    检查本地中文字体并返回 @font-face CSS。
+    Checks for local fonts and returns @font-face CSS.
+    It defines 'LocalEN' for English and 'LocalCJK' for Chinese characters,
+    then sets the body font family to use them in the correct order.
     """
-    font_path = Path("assets/fonts/NotoSansSC-Regular.otf")
-    if font_path.exists():
-        font_uri = font_path.resolve().as_uri()
-        return f"""
+    font_dir = Path("assets/fonts")
+    
+    # Find any existing Chinese font file
+    cjk_font_path = None
+    target_cjk_fonts = ["NotoSansMonoCJKsc-VF.otf", "NotoSansSC-Regular.otf"]
+    for f_name in target_cjk_fonts:
+        if (font_dir / f_name).exists():
+            cjk_font_path = font_dir / f_name
+            break
+            
+    if not cjk_font_path and font_dir.exists():
+        for ext in ["*.otf", "*.ttf"]:
+            found = list(font_dir.glob(ext))
+            if found:
+                cjk_font_path = found[0]
+                break
+
+    cjk_font_css = ""
+    if cjk_font_path and cjk_font_path.exists():
+        cjk_font_uri = cjk_font_path.resolve().as_uri()
+        cjk_font_css = f"""
         @font-face {{
             font-family: 'LocalCJK';
-            src: url('{font_uri}') format('opentype');
+            src: url('{cjk_font_uri}') format('opentype');
             font-weight: normal;
             font-style: normal;
         }}
         """
-    return ""
+
+    # Combine all CSS and define the font-family stack
+    final_css = cjk_font_css
+    if final_css:
+        # Prioritize CJK font (which includes Noto Sans Latin glyphs), then system fallbacks
+        final_css += """
+        .markdown-body {
+            font-family: 'LocalCJK', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+        }
+        """
+    
+    return final_css
 
 
 def remove_docsy_front_matter(md_text: str) -> str:
-    """
-    从 Markdown 文本中删除 docsy 的 front matter。
-    """
+    """从 Markdown 文本中删除 docsy 的 front matter。"""
     lines = md_text.split('\n')
     if not lines:
         return md_text
@@ -181,29 +207,22 @@ def _prepare_markdown_for_render(md_path: Path, filter_front_matter: bool) -> Tu
 
 
 async def md_to_pdf_with_mermaid_async(md_path: Path, out_pdf: Path, filter_front_matter: bool = False) -> bool:
-    """
-    异步转换 Markdown 为 PDF。
-    使用与脚本同目录下的 template.html。
-    """
+    """异步转换 Markdown 为 PDF。"""
     try:
         from playwright.async_api import async_playwright
     except Exception:
         print("✗ Playwright dependency missing")
         return False
 
-    # 1. 准备渲染数据
     md_source_js, base_href = _prepare_markdown_for_render(md_path, filter_front_matter)
     font_css = get_custom_font_css()
-    font_family = ("'LocalCJK', " if font_css else "") + "sans-serif"
     
-    # 2. 准备脚本标签
     js_keys = [
         'js_mdit', 'js_hljs', 'js_katex', 'js_katex_auto', 'js_mermaid',
         'js_mdit_anchor', 'js_mdit_toc', 'js_mdit_katex', 'js_mdit_task', 'js_mdit_emoji'
     ]
     script_tags = "\n".join([f'<script src="{get_asset_url(key)}"></script>' for key in js_keys if get_asset_url(key)])
 
-    # 3. 加载模板（路径修改：template.html 与当前脚本在同一文件夹）
     template_path = Path(__file__).parent / "template.html"
     if not template_path.exists():
         print(f"✗ Critical Error: HTML template not found at {template_path}")
@@ -211,7 +230,6 @@ async def md_to_pdf_with_mermaid_async(md_path: Path, out_pdf: Path, filter_fron
     
     template_content = template_path.read_text(encoding="utf-8")
     
-    # 4. 执行替换
     replacements = {
         "__VAR_BASE_HREF__": base_href,
         "__VAR_TITLE__": md_path.stem,
@@ -219,7 +237,6 @@ async def md_to_pdf_with_mermaid_async(md_path: Path, out_pdf: Path, filter_fron
         "__VAR_CSS_HLJS__": get_asset_url('css_hljs'),
         "__VAR_CSS_KATEX__": get_asset_url('css_katex'),
         "__VAR_FONT_CSS__": font_css,
-        "__VAR_FONT_FAMILY__": font_family,
         "__VAR_SCRIPT_TAGS__": script_tags,
         "__VAR_MD_SOURCE__": md_source_js
     }
@@ -228,7 +245,6 @@ async def md_to_pdf_with_mermaid_async(md_path: Path, out_pdf: Path, filter_fron
     for placeholder, value in replacements.items():
         html = html.replace(placeholder, value)
 
-    # 5. 写入临时文件并渲染
     import tempfile
     with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
         f.write(html)
@@ -236,22 +252,20 @@ async def md_to_pdf_with_mermaid_async(md_path: Path, out_pdf: Path, filter_fron
 
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(args=["--allow-file-access-from-files"])
+            # 允许跨域访问本地文件（CSS/JS）
+            browser = await p.chromium.launch(args=["--allow-file-access-from-files", "--no-sandbox"])
             page = await browser.new_page()
-            page.on("console", lambda msg: print(f"Browser: {msg.text}"))
             
             await page.goto(tmp_html_path.resolve().as_uri(), wait_until="networkidle", timeout=60000)
             
-            # 等待内容生成
+            # 确保字体加载完成
+            await page.evaluate("document.fonts.ready")
+            
             await page.wait_for_function(
                 "document.getElementById('md-root') && document.getElementById('md-root').innerHTML.trim().length > 0", 
                 timeout=30000
             )
-            
-            if await page.evaluate("document.body.innerHTML === 'JS_EXECUTION_ERROR'"):
-                raise Exception("JavaScript execution failed inside the page.")
 
-            await page.wait_for_timeout(1000)
             await page.pdf(path=str(out_pdf), print_background=True, prefer_css_page_size=True)
             await browser.close()
         return True
@@ -312,10 +326,10 @@ def process_markdown_files(
                     input_file=out_pdf,
                     output_file=out_pdf,
                     watermark_image=watermark_image,
-                    watermark_type=config.get("watermark_type", "grid"),
-                    opacity=config.get("opacity", 0.2),
-                    angle=config.get("angle", 45),
-                    image_scale=config.get("image_scale", 1.0),
+                    watermark_type=config.get("watermark_type", "grid") if config else "grid",
+                    opacity=config.get("opacity", 0.2) if config else 0.2,
+                    angle=config.get("angle", 45) if config else 45,
+                    image_scale=config.get("image_scale", 1.0) if config else 1.0,
                 )
             
             if watermark_success and rename_by_title:

@@ -20,16 +20,12 @@ def cleanup_generated_watermark(watermark_image: Optional[str], config: dict) ->
         return
     
     watermark_path = Path(watermark_image)
-    
-    # Only delete if it's a generated text watermark (config type is text, or not image and no image path)
-    # AND it's a temporary file (i.e., not explicitly saved to the output directory by the user)
-    # Check if the file is NOT in the output directory and is NOT a user-provided image path
+
     is_generated_text_watermark = (
         config.get("type") == "text" or
         (config.get("type") != "image" and not config.get("image"))
     )
     
-    # If it's a generated text watermark and its parent is not 'output' (meaning it's a temporary file)
     if watermark_path.exists() and is_generated_text_watermark and watermark_path.parent != Path("output").resolve():
         try:
             watermark_path.unlink()
@@ -237,7 +233,6 @@ class WebUI:
                             # Use timer to ensure DOM is ready
                             ui.timer(0.1, enable_image_option, once=True)
 
-                # Initialize without JavaScript (skip_js=True)
                 update_watermark_mode_behavior(skip_js=True)
                 self.mode_radio.on('update:model-value', lambda e: update_watermark_mode_behavior(e))
 
@@ -254,7 +249,25 @@ class WebUI:
                                 on_upload=self.handle_file_upload,
                                 multiple=True,
                                 auto_upload=True
-                            ).classes('w-full')
+                            ).classes('w-full').on('remove_file', self.handle_remove_uploaded_file)
+
+                            self.file_upload_widget.add_slot('list', r'''
+                                <q-list separator>
+                                    <q-item v-for="file in props.files" :key="file.name">
+                                        <q-item-section>
+                                            <q-item-label class="full-width ellipsis">
+                                                {{ file.name }}
+                                            </q-item-label>
+                                            <q-item-label caption>
+                                                {{ file.size }} bytes
+                                            </q-item-label>
+                                        </q-item-section>
+                                        <q-item-section side>
+                                            <q-btn flat round dense icon="delete" @click="() => $parent.$emit('remove_file', file)" />
+                                        </q-item-section>
+                                    </q-item>
+                                </q-list>
+                            ''')
 
                         self.uploaded_files_label = ui.label('').classes('mt-2 text-sm')
 
@@ -330,23 +343,25 @@ class WebUI:
 
         self.file_list_container.clear()
 
-        # Update button states
         if self.clear_files_button is not None:
             self.clear_files_button.enable() if not self.is_processing else self.clear_files_button.disable()
 
-        # Update progress in header
+        # Update progress and singular/plural formatting
         if self.progress_label is not None:
             if self.is_processing and self.processing_progress[1] > 0:
-                # Use current batch progress tracking
-                completed_count, total_count = self.processing_progress
-                progress_percentage = int((completed_count / total_count) * 100)
-                self.progress_label.text = f'{completed_count}/{total_count} {progress_percentage}%'
+                completed, total = self.processing_progress
+                pct = int((completed / total) * 100)
+                self.progress_label.text = f'{completed}/{total} {pct}%'
                 self.progress_label.classes('text-sm text-green-600 font-medium')
             elif len(self.processed_files) > 0:
-                 # Show total count when not processing
-                 total_count = len(self.processed_files)
-                 self.progress_label.text = t('total_files_count', count=total_count)
-                 self.progress_label.classes('text-sm text-green-600')
+                total_count = len(self.processed_files)
+                # Handle Singular/Plural
+                if total_count == 1:
+                    # If your i18n supports pluralization keys, use them, otherwise use logic
+                    self.progress_label.text = t('total_file_count', count=total_count)
+                else:
+                    self.progress_label.text = t('total_files_count', count=total_count)
+                self.progress_label.classes('text-sm text-green-600')
             else:
                 self.progress_label.text = ''
 
@@ -500,7 +515,25 @@ class WebUI:
                         on_upload=self.handle_file_upload,
                         multiple=True,
                         auto_upload=True
-                    ).classes('w-full')
+                    ).classes('w-full').on('remove_file', self.handle_remove_uploaded_file)
+                    self.file_upload_widget.add_slot('list', r'''
+                        <q-list separator>
+                            <q-item v-for="file in props.files" :key="file.name">
+                                <q-item-section>
+                                    <q-item-label class="full-width ellipsis">
+                                        {{ file.name }}
+                                    </q-item-label>
+                                    <q-item-label caption>
+                                        {{ file.size }} bytes
+                                    </q-item-label>
+                                </q-item-section>
+                                <q-item-section side>
+                                    <q-btn flat round dense icon="delete" @click="() => $parent.$emit('remove_file', file)" />
+                                </q-item-section>
+                            </q-item>
+                        </q-list>
+                    ''')
+
             except Exception as e:
                 print(f"Warning: Could not recreate upload widget: {e}")
             return
@@ -551,7 +584,25 @@ class WebUI:
                     on_upload=self.handle_file_upload,
                     multiple=True,
                     auto_upload=True
-                ).classes('w-full')
+                ).classes('w-full').on('remove_file', self.handle_remove_uploaded_file)
+                self.file_upload_widget.add_slot('list', r'''
+                    <q-list separator>
+                        <q-item v-for="file in props.files" :key="file.name">
+                            <q-item-section>
+                                <q-item-label class="full-width ellipsis">
+                                    {{ file.name }}
+                                </q-item-label>
+                                <q-item-label caption>
+                                    {{ file.size }} bytes
+                                </q-item-label>
+                            </q-item-section>
+                            <q-item-section side>
+                                <q-btn flat round dense icon="delete" @click="() => $parent.$emit('remove_file', file)" />
+                            </q-item-section>
+                        </q-item>
+                    </q-list>
+                ''')
+
         except Exception as e:
             print(f"Warning: Could not recreate upload widget: {e}")
             import traceback
@@ -576,7 +627,36 @@ class WebUI:
         self.uploaded_files[filename] = str(save_path)
 
         ui.notify(t('file_uploaded', filename=filename), position='top')
-    
+
+    async def handle_remove_uploaded_file(self, e: any):
+        """处理从上传组件中移除文件的事件"""
+        file = e.args
+        filename = file['name']
+
+        # 1. 从追踪字典 self.uploaded_files 中移除该文件记录
+        if filename in self.uploaded_files:
+            file_path = Path(self.uploaded_files[filename])
+            
+            # 2. 尝试从磁盘删除 temp_uploads 目录下的临时文件
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+            except Exception as ex:
+                print(f"警告：删除已移除的临时文件 {filename} 失败: {ex}")
+            
+            # 3. 正式删除字典中的记录
+            del self.uploaded_files[filename]
+
+            # 4. 更新 UI
+            if self.uploaded_files_label:
+                count = len(self.uploaded_files)
+                self.uploaded_files_label.text = t('files_selected', count=count) if count > 0 else ""
+            
+            # 5. 从前端组件中移除文件
+            self.file_upload_widget.run_method('removeFile', file)
+            
+            ui.notify(f"已移除文件: {filename}", position='top', type='info')
+            
     async def handle_watermark_image_upload(self, e: UploadEventArguments):
         file_obj = getattr(e, 'file', None)
         if file_obj is None:
