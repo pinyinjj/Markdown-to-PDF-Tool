@@ -1,6 +1,5 @@
 # Markdown 转 PDF 转换器与水印工具
 
-[![Docker Image CI](https://github.com/pinyinjj/Markdown-to-PDF-Tool/actions/workflows/docker-image.yml/badge.svg)](https://github.com/pinyinjj/Markdown-to-PDF-Tool/actions/workflows/docker-image.yml)
 [![License](https://img.shields.io/github/license/pinyinjj/Markdown-to-PDF-Tool)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/pinyinjj/Markdown-to-PDF-Tool?style=social)](https://github.com/pinyinjj/Markdown-to-PDF-Tool/star)
 [![GitHub Forks](https://img.shields.io/github/forks/pinyinjj/Markdown-to-PDF-Tool?style=social)](https://github.com/pinyinjj/Markdown-to-PDF-Tool/fork)
