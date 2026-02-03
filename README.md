@@ -60,40 +60,6 @@ http://localhost:8080
 
 You should see the application's user interface.
 
-## ⚙️ Configuration
-
-The application offers flexible configuration options:
-
-### Web Interface Settings
-
-Most dynamic settings, such as watermark text, opacity, angle, and processing modes, are managed directly through the intuitive web interface. Your preferences are saved per session.
-
-**Available Operations:**
-
-*   **Markdown to PDF**: Convert Markdown files with GitHub-style rendering, code highlighting, Mermaid, and KaTeX.
-*   **Process PDF with Watermark**: Add custom watermarks to existing PDF documents.
-*   **Generate Watermark Only**: Create and customize text or image watermarks for later use.
-
-### Environment Variables (Advanced)
-
-While `config.py` defines default parameters, you can override certain aspects using environment variables for Docker deployments.
-*   Currently, the application relies primarily on `config.py` for default values.
-*   **To customize `config.py` settings:**
-    1.  Fork the repository and modify `config.py` directly.
-    2.  Build your custom Docker image.
-    3.  Alternatively, you could extend the `Dockerfile` to copy your custom `config.py` or modify the entrypoint script to set environment variables that your application then reads.
-    *(Future development might include direct support for common settings via environment variables.)*
-
-**Example of a potential environment variable usage (if implemented in the application):**
-
-```yaml
-services:
-  md-pdf-watermark:
-    environment:
-      - FONT_SIZE=48
-      - WATERMARK_OPACITY=0.3
-      # ... other settings
-```
 
 ## 🤝 Contributing
 
