@@ -29,10 +29,6 @@ A secure, privacy-focused, self-hosted web application for converting Markdown t
 
 The quickest way to get `Markdown to PDF Converter & Watermarker` up and running is with a single Docker command.
 
-### Prerequisites
-
-Ensure you have [Docker](https://docs.docker.com/get-docker/) installed on your system.
-
 ### Launch the Service
 
 ```bash
@@ -45,7 +41,6 @@ docker run -d \
   -v "$(pwd)/temp_uploads:/app/temp_uploads" \
   ghcr.io/pinyinjj/markdown-to-pdf-tool:latest
 ```
-This command will automatically download the latest Docker image (if not available locally), create a container named `md-pdf-watermark`, map port `8080` from your host to the container, and mount local directories for persistent storage of input files, generated PDFs, temporary uploads, and watermarks.
 
 ### Access the Web Interface
 
