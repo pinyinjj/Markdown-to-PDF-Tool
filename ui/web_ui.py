@@ -242,49 +242,50 @@ class WebUI:
                     self.file_selection_container = ui.column().classes('w-full h-full justify-between')
                     with self.file_selection_container:
                         # Create upload widget wrapper to make it easier to replace
-                        self.upload_widget_container = ui.element('div').classes('w-full')
-                        with self.upload_widget_container:
-                            self.file_upload_widget = ui.upload(
-                                label=t('auto_upload_hint'),
-                                on_upload=self.handle_file_upload,
-                                multiple=True,
-                                auto_upload=True
-                            ).classes('w-full').on('remove_file', self.handle_remove_uploaded_file)
+                        with ui.column().classes('w-full grow h-full'): # Top content wrapper
+                            self.upload_widget_container = ui.element('div').classes('w-full')
+                            with self.upload_widget_container:
+                                self.file_upload_widget = ui.upload(
+                                    label=t('auto_upload_hint'),
+                                    on_upload=self.handle_file_upload,
+                                    multiple=True,
+                                    auto_upload=True
+                                ).classes('w-full').on('remove_file', self.handle_remove_uploaded_file)
 
-                            self.file_upload_widget.add_slot('list', r'''
-                                <q-list separator>
-                                    <q-item v-for="file in props.files" :key="file.name">
-                                        <q-item-section>
-                                            <q-item-label class="full-width ellipsis">
-                                                {{ file.name }}
-                                            </q-item-label>
-                                            <q-item-label caption>
-                                                {{ file.size }} bytes
-                                            </q-item-label>
-                                        </q-item-section>
-                                        <q-item-section side>
-                                            <q-btn flat round dense icon="delete" @click="() => $parent.$emit('remove_file', file)" />
-                                        </q-item-section>
-                                    </q-item>
-                                </q-list>
-                            ''')
+                                self.file_upload_widget.add_slot('list', r'''
+                                    <q-list separator>
+                                        <q-item v-for="file in props.files" :key="file.name">
+                                            <q-item-section>
+                                                <q-item-label class="full-width ellipsis">
+                                                    {{ file.name }}
+                                                </q-item-label>
+                                                <q-item-label caption>
+                                                    {{ file.size }} bytes
+                                                </q-item-label>
+                                            </q-item-section>
+                                            <q-item-section side>
+                                                <q-btn flat round dense icon="delete" @click="() => $parent.$emit('remove_file', file)" />
+                                            </q-item-section>
+                                        </q-item>
+                                    </q-list>
+                                    ''')
 
-                        self.uploaded_files_label = ui.label('').classes('mt-2 text-sm')
+                            self.uploaded_files_label = ui.label('').classes('mt-2 text-sm')
 
-                        self.markdown_options_container = ui.column().classes('w-full mt-3 markdown-options-container')
-                        with self.markdown_options_container:
-                            with ui.row().classes('w-full gap-4'):
-                                self.filter_front_matter_checkbox = ui.checkbox(
-                                    t('filter_docsy_front_matter'),
-                                    value=True,
-                                )
+                            self.markdown_options_container = ui.column().classes('w-full mt-3 markdown-options_container')
+                            with self.markdown_options_container:
+                                with ui.row().classes('w-full gap-4'):
+                                    self.filter_front_matter_checkbox = ui.checkbox(
+                                        t('filter_docsy_front_matter'),
+                                        value=True,
+                                    )
 
-                                self.rename_by_title_checkbox = ui.checkbox(
-                                    t('rename_pdf_by_h1_title'),
-                                    value=False,
-                                )
+                                    self.rename_by_title_checkbox = ui.checkbox(
+                                        t('rename_pdf_by_h1_title'),
+                                        value=False,
+                                    )   
 
-                        with ui.row().classes('w-full justify-center mt-auto pt-4'):
+                        with ui.row().classes('w-full justify-center pt-4'): 
                             self.process_button = ui.button(
                                 t('start_processing'),
                                 on_click=self.process_files,
@@ -396,7 +397,7 @@ class WebUI:
             elif status == 'pending':
                 ui.spinner(size='sm', color='primary')
             elif status == 'error':
-                ui.icon('refresh').classes('text-orange-500 cursor-pointer')  # 可点击的重试图标
+                ui.icon('refresh').props('size=sm').classes('text-orange-500 cursor-pointer')  # 可点击的重试图标
             else:
                 # Default to processing spinner for unknown states
                 ui.spinner(size='sm', color='primary')
@@ -555,7 +556,6 @@ class WebUI:
                     }})();
                 ''')
             
-            # Delete the old widget
             try:
                 old_widget.delete()
             except Exception:
@@ -890,8 +890,14 @@ class WebUI:
                 if conflict_strategy == 'overwrite':
                     return base_out
                 elif conflict_strategy == 'rename' and base_out.exists():
-                    # Prediction might be off if multiple conflicts, but good enough for UI init
-                    return base_out.parent / f"{base_out.stem}_new{base_out.suffix}"
+                    counter = 1
+                    stem = base_out.stem
+                    suffix = base_out.suffix
+                    new_output_file = base_out.parent / f"{stem}_new{suffix}"
+                    while new_output_file.exists():
+                        counter += 1
+                        new_output_file = base_out.parent / f"{stem}_new{counter}{suffix}"
+                    return new_output_file
                 return base_out
 
             expected_outputs.extend([predict_output(p) for p in final_pdf_files])
@@ -1006,6 +1012,7 @@ class WebUI:
             
             finally:
                 self.is_processing = False
+                self.load_existing_output_files()  # Reload files from disk to ensure consistency
                 self.update_file_list()
                 self.process_button.enable()
                 
@@ -1139,7 +1146,10 @@ class WebUI:
             # Apply conflict resolution if the actual_output_file already exists
             if actual_output_file.exists():
                 if conflict_strategy == 'overwrite':
-                    pass
+                    try:
+                        actual_output_file.unlink()
+                    except Exception as e:
+                        print(f"Warning: Could not delete existing file for overwrite: {e}")
                 elif conflict_strategy == 'skip':
                     continue
                 else: # rename (default)
@@ -1155,12 +1165,15 @@ class WebUI:
             # --- Update internal state with the actual, final output file path ---
             # If the actual output path is different from the predicted one, update self.processed_files and self.file_processing_status
             if actual_output_file != predicted_output_path:
-                # Remove the predicted (placeholder) path from self.processed_files
-                if predicted_output_path in self.processed_files:
-                    self.processed_files.remove(predicted_output_path)
-                # Remove its status entry
-                if predicted_output_path in self.file_processing_status:
-                    del self.file_processing_status[predicted_output_path]
+                # If the strategy is 'rename', we want to keep the original file in the list.
+                # For other strategies, we replace the placeholder.
+                if conflict_strategy != 'rename':
+                    # Remove the predicted (placeholder) path from self.processed_files
+                    if predicted_output_path in self.processed_files:
+                        self.processed_files.remove(predicted_output_path)
+                    # Remove its status entry
+                    if predicted_output_path in self.file_processing_status:
+                        del self.file_processing_status[predicted_output_path]
                 
                 # Insert the actual, final output_file into self.processed_files
                 if actual_output_file not in self.processed_files: # Ensure no accidental re-adds
