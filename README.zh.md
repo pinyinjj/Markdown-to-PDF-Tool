@@ -29,6 +29,7 @@
 
 ### 启动服务
 
+#### Linux / macOS (Bash)
 ```bash
 docker run -d \
   --name md-pdf-watermark \
@@ -38,6 +39,45 @@ docker run -d \
   -v "$(pwd)/input:/app/input" \
   -v "$(pwd)/temp_uploads:/app/temp_uploads" \
   ghcr.io/pinyinjj/markdown-to-pdf-tool:latest
+```
+
+#### Windows (PowerShell)
+```powershell
+docker run -d `
+  --name md-pdf-watermark `
+  -p 8080:8080 `
+  -v "${PWD}/output:/app/output" `
+  -v "${PWD}/watermarks:/app/watermarks" `
+  -v "${PWD}/input:/app/input" `
+  -v "${PWD}/temp_uploads:/app/temp_uploads" `
+  ghcr.io/pinyinjj/markdown-to-pdf-tool:latest
+```
+
+#### Docker Compose (推荐)
+
+1. 创建一个 `docker-compose.yml` 文件，内容如下：
+
+```yaml
+version: '3.8'
+
+services:
+  md-pdf-watermark:
+    image: ghcr.io/pinyinjj/markdown-to-pdf-tool:latest
+    container_name: md-pdf-watermark
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./input:/app/input
+      - ./output:/app/output
+      - ./temp_uploads:/app/temp_uploads
+      - ./watermarks:/app/watermarks
+    restart: unless-stopped
+```
+
+2. 在同一目录下运行以下命令：
+
+```bash
+docker compose up -d
 ```
 
 

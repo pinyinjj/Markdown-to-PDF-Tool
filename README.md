@@ -31,6 +31,7 @@ The quickest way to get `Markdown to PDF Converter & Watermarker` up and running
 
 ### Launch the Service
 
+#### Linux / macOS (Bash)
 ```bash
 docker run -d \
   --name md-pdf-watermark \
@@ -40,6 +41,45 @@ docker run -d \
   -v "$(pwd)/input:/app/input" \
   -v "$(pwd)/temp_uploads:/app/temp_uploads" \
   ghcr.io/pinyinjj/markdown-to-pdf-tool:latest
+```
+
+#### Windows (PowerShell)
+```powershell
+docker run -d `
+  --name md-pdf-watermark `
+  -p 8080:8080 `
+  -v "${PWD}/output:/app/output" `
+  -v "${PWD}/watermarks:/app/watermarks" `
+  -v "${PWD}/input:/app/input" `
+  -v "${PWD}/temp_uploads:/app/temp_uploads" `
+  ghcr.io/pinyinjj/markdown-to-pdf-tool:latest
+```
+
+#### Docker Compose (Recommended)
+
+1. Create a `docker-compose.yml` file with the following content:
+
+```yaml
+version: '3.8'
+
+services:
+  md-pdf-watermark:
+    image: ghcr.io/pinyinjj/markdown-to-pdf-tool:latest
+    container_name: md-pdf-watermark
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./input:/app/input
+      - ./output:/app/output
+      - ./temp_uploads:/app/temp_uploads
+      - ./watermarks:/app/watermarks
+    restart: unless-stopped
+```
+
+2. Run the following command in the same directory:
+
+```bash
+docker compose up -d
 ```
 
 ### Access the Web Interface
