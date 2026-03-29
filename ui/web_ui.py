@@ -740,12 +740,13 @@ class WebUI:
             if config['type'] == 'text':
                 config['text'] = self.watermark_text_input.value or 'Watermark'
                 config['add_date'] = self.add_date_checkbox.value
-            else:
+            elif config['type'] == 'image':
                 image_path = self.watermark_image_path
                 if image_path and Path(image_path).exists():
                     config['image'] = image_path
                 else:
                     raise ValueError(t('invalid_watermark_image_path'))
+            # For 'none' type, we just proceed as no_watermark is already set to True
         elif config['mode'] == 'watermark_only':
             # watermark_only mode only supports text watermark
             config['type'] = 'text'
@@ -790,8 +791,9 @@ class WebUI:
             
             if mode == 'markdown_with_images':
                 md_files = [p for p in selected_paths if p.suffix.lower() in ('.md', '.markdown')]
+                print(f"DEBUG: Mode=markdown_with_images, total_files={len(selected_paths)}, md_files={[p.name for p in md_files]}")
                 if len(md_files) != 1:
-                    ui.notify('Please upload exactly ONE markdown file and its images for this mode.', type='negative', position='top')
+                    ui.notify(t('only_one_md_allowed_with_images'), type='negative', position='top')
                     return
                 main_md = md_files[0]
                 # Prepare a dedicated directory for this markdown and its images
@@ -922,11 +924,15 @@ class WebUI:
                             **{k: v for k, v in self.config.items() if k not in ['mode']}
                         )
                     else: # markdown or markdown_with_images
+                        config_kwargs = {k: v for k, v in self.config.items() if k not in ['mode']}
+                        if mode == 'markdown_with_images':
+                            config_kwargs['resolve_relative_paths'] = True
+                            
                         success, output_files = await self.process_files_individually(
                             final_md_files, 'markdown', watermark_image,
                             predicted_output_map={p: target_map[p] for p in final_md_files},
                             conflict_strategy=conflict_strategy,
-                            **{k: v for k, v in self.config.items() if k not in ['mode']}
+                            **config_kwargs
                         )
                     
                     if watermark_image and not self.config.get('no_watermark', False):
@@ -982,11 +988,19 @@ class WebUI:
                     success = True
             elif mode == 'markdown':
                 # First convert markdown to PDF
-                from core.markdown_processor import md_to_pdf_with_mermaid_async
+                from core.markdown_processor import md_to_pdf_with_mermaid
                 temp_pdf = output_file.with_suffix('.temp.pdf')
 
-                # Convert markdown to PDF
-                if await md_to_pdf_with_mermaid_async(file_path, temp_pdf, filter_front_matter=kwargs.get('filter_front_matter', False)):
+                # Convert markdown to PDF in a separate thread to ensure ProactorEventLoop on Windows
+                conversion_success = await asyncio.to_thread(
+                    md_to_pdf_with_mermaid,
+                    file_path, 
+                    temp_pdf, 
+                    filter_front_matter=kwargs.get('filter_front_matter', False),
+                    resolve_relative_paths=kwargs.get('resolve_relative_paths', False)
+                )
+                
+                if conversion_success:
                     if watermark_image:
                         # Add watermark to the PDF
                         success = await asyncio.to_thread(

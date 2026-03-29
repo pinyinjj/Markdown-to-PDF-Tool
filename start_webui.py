@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 import sys
+import asyncio
+
+# Fix for Windows asyncio NotImplementedError when running Playwright
+# Must be at the very top before any other imports that might create a loop
+if sys.platform == 'win32':
+    if not isinstance(asyncio.get_event_loop_policy(), asyncio.WindowsProactorEventLoopPolicy):
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        print("✓ Applied WindowsProactorEventLoopPolicy")
+
 import argparse
 from pathlib import Path
 from nicegui import ui, app

@@ -196,25 +196,71 @@ def get_markdown_files(input_dir: Path) -> List[Path]:
     return sorted(md_files)
 
 
-def _prepare_markdown_for_render(md_path: Path, filter_front_matter: bool) -> Tuple[str, str]:
+def _prepare_markdown_for_render(md_path: Path, filter_front_matter: bool, resolve_relative_paths: bool = False) -> Tuple[str, str]:
     """准备用于 HTML 渲染的数据。"""
     md_text = md_path.read_text(encoding="utf-8")
     if filter_front_matter:
         md_text = remove_docsy_front_matter(md_text)
+    
+    if resolve_relative_paths:
+        # Convert relative or absolute-style image paths to absolute file URIs
+        # Pattern for Markdown images: ![alt](path)
+        def replace_path(match):
+            alt = match.group(1)
+            original_path_str = match.group(2)
+            
+            # Skip if it's already a remote URL or data URI
+            if original_path_str.startswith(('http://', 'https://', 'data:')):
+                return match.group(0)
+            
+            # Extract just the filename if it looks like a path (e.g., /Docsy/images/img.png -> img.png)
+            filename = Path(original_path_str).name
+            
+            # First, check if just the filename exists in the same directory as the MD
+            # (In "markdown_with_images" mode, we've flattened the structure)
+            img_path = (md_path.parent / filename).resolve()
+            
+            if img_path.exists():
+                print(f"DEBUG: Simplified image path: [{original_path_str}] -> [{filename}]")
+                return f'![{alt}]({filename})'
+            
+            # If not found, try to resolve original path relative to the markdown file
+            img_path_full = (md_path.parent / original_path_str).resolve()
+            if img_path_full.exists():
+                print(f"DEBUG: Found image at original path: [{original_path_str}]")
+                return match.group(0)
+            
+            print(f"DEBUG: Failed to resolve image path: [{original_path_str}] (searched for '{filename}' in {md_path.parent})")
+            return match.group(0)
+            
+        # Use a more robust regex to avoid matching across lines or breaking on nested brackets
+        md_text = re.sub(r'!\[([^\]]*)\]\(([^\)]*)\)', replace_path, md_text)
+
     md_source_js = json.dumps(md_text)
     base_href = md_path.parent.resolve().as_uri() + "/"
     return md_source_js, base_href
 
 
-async def md_to_pdf_with_mermaid_async(md_path: Path, out_pdf: Path, filter_front_matter: bool = False) -> bool:
+async def md_to_pdf_with_mermaid_async(md_path: Path, out_pdf: Path, filter_front_matter: bool = False, resolve_relative_paths: bool = False) -> bool:
     """异步转换 Markdown 为 PDF。"""
+    import sys
+    import asyncio
+    
+    # Second safety check: Playwright needs Proactor on Windows
+    if sys.platform == 'win32':
+        if not isinstance(asyncio.get_event_loop_policy(), asyncio.WindowsProactorEventLoopPolicy):
+            try:
+                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+            except:
+                pass
+
     try:
         from playwright.async_api import async_playwright
     except Exception:
         print("✗ Playwright dependency missing")
         return False
 
-    md_source_js, base_href = _prepare_markdown_for_render(md_path, filter_front_matter)
+    md_source_js, base_href = _prepare_markdown_for_render(md_path, filter_front_matter, resolve_relative_paths)
     font_css = get_custom_font_css()
     
     js_keys = [
@@ -277,16 +323,16 @@ async def md_to_pdf_with_mermaid_async(md_path: Path, out_pdf: Path, filter_fron
             tmp_html_path.unlink()
 
 
-def md_to_pdf_with_mermaid(md_path: Path, out_pdf: Path, filter_front_matter: bool = False) -> bool:
+def md_to_pdf_with_mermaid(md_path: Path, out_pdf: Path, filter_front_matter: bool = False, resolve_relative_paths: bool = False) -> bool:
     """同步包装器。"""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(md_to_pdf_with_mermaid_async(md_path, out_pdf, filter_front_matter))
+        return asyncio.run(md_to_pdf_with_mermaid_async(md_path, out_pdf, filter_front_matter, resolve_relative_paths))
     
     result = {"ok": False}
     def _runner():
-        result["ok"] = asyncio.run(md_to_pdf_with_mermaid_async(md_path, out_pdf, filter_front_matter))
+        result["ok"] = asyncio.run(md_to_pdf_with_mermaid_async(md_path, out_pdf, filter_front_matter, resolve_relative_paths))
     t_thread = threading.Thread(target=_runner)
     t_thread.start()
     t_thread.join()
