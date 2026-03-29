@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.get_version.outputs.VERSION }}
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
@@ -20,10 +22,36 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sync to build-image branch
+      - name: Auto-increment version
+        id: get_version
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Read current version from file (default to 1.0.0 if not exists)
+          VERSION=$(cat VERSION 2>/dev/null || echo "1.0.0")
+          
+          # Increment patch version (last part of x.y.z)
+          BASE_VERSION=$(echo $VERSION | cut -d. -f1,2)
+          PATCH_VERSION=$(echo $VERSION | cut -d. -f3)
+          NEW_PATCH_VERSION=$((PATCH_VERSION + 1))
+          NEW_VERSION="$BASE_VERSION.$NEW_PATCH_VERSION"
+          
+          echo "Current Version: $VERSION"
+          echo "New Version: $NEW_VERSION"
+          
+          # Save new version to file
+          echo $NEW_VERSION > VERSION
+          echo "VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
+          
+          # Commit and push back to main
+          git add VERSION
+          git commit -m "chore: bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
+          git push origin main
+
+      - name: Sync to build-image branch
+        run: |
+          # The VERSION file is already updated and pushed to main in the previous step
           git checkout -B build-image main
           git push -f origin build-image
 
@@ -57,6 +85,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest
+            type=raw,value=v${{ needs.sync.outputs.version }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
