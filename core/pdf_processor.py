@@ -89,5 +89,5 @@ def add_watermark_to_file(
         print("✗ " + t('processing_failed_with_error', file=input_file.name, error=stderr))
         return False
         
-    print("✓ " + t('processing_successful', src=input_file.name, dst=output_file.name))
+    print("✓ " + t('processing_successful_detail', src=input_file.name, dst=output_file.name))
     return True

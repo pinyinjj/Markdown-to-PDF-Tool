@@ -5,8 +5,8 @@ ZH: dict = {
     'operation_mode_title': '1. 操作模式选择',
     'process_pdf_with_watermark': 'PDF加水印',
     'convert_md_to_pdf_with_watermark': 'Markdown to PDF',
+    'convert_md_with_images_to_pdf': '带图片的 MD 转 PDF',
     'generate_watermark_only': '生成图片水印',
-    'convert_md_to_pdf_no_watermark': '转换Markdown到PDF（无水印）',
     'generate_watermark': '生成水印',
     'exit_program': '退出程序',
     'invalid_choice': '无效选择，请输入',
@@ -26,7 +26,6 @@ ZH: dict = {
 
     # 处理过程
     'start_generating_watermark': '开始生成水印图片...',
-    'start_converting_md_no_watermark': '开始转换Markdown到PDF（无水印）...',
     'start_processing_files': '开始处理文件...',
     'watermark_mode': '水印模式',
     'input_directory': '输入目录',
@@ -48,8 +47,8 @@ ZH: dict = {
     'pdf_processing_completed': 'PDF处理完成：{success}/{total} 成功',
     'no_pdf_files_processed': '没有成功处理任何PDF文件',
     'found_pdf_files': '找到 {count} 个PDF文件',
-    'processing_successful': '成功处理：{src} -> {dst}',
-    'processing_failed': '处理失败：{file}',
+    'processing_successful_detail': '成功处理：{src} -> {dst}',
+    'processing_failed_detail': '处理失败：{file}',
     'processing_failed_with_error': '处理失败：{file} - {error}',
 
     # 错误信息
@@ -123,6 +122,7 @@ ZH: dict = {
     'overwrite': '覆盖',
     'coexist_rename': '并存 (自动重命名)',
     'watermark_generation_failed': '水印生成失败',
+    'only_one_md_allowed_with_images': '图片模式下只允许上传一个 Markdown 文件。',
     'no_markdown_files_selected': '未找到可处理的Markdown文件',
     'watermark_image_not_found': '水印图片未找到',
     'no_files_found': '未找到可处理的文件',

@@ -84,6 +84,12 @@ class WebUI:
                 .mode-radio-group .q-radio { white-space: nowrap; }
                 .watermark-radio-disabled { opacity: 0.5 !important; cursor: not-allowed !important; pointer-events: none !important; }
                 .watermark-card-content { display: flex; flex-direction: column; gap: 1rem; align-items: flex-start; width: 100%; }
+                
+                /* 精准微调：图标与文字间距缩减一半 */
+                .watermark-radio-inline .q-radio { margin-right: 0 !important; padding: 0 !important; min-width: 0 !important; align-items: center !important; }
+                .watermark-radio-inline .q-radio__label { font-size: 0.95rem !important; padding-left: 0px !important; margin-left: 0px !important; white-space: nowrap !important; line-height: 1.2 !important; padding-top: 2px !important; }
+                .watermark-radio-inline .q-radio__inner { transform: scale(0.95); margin-right: 0px !important; }
+                .watermark-radio-inline { display: flex !important; flex-wrap: nowrap !important; justify-content: flex-start; width: 100%; gap: 0px; }
             </style>
         ''')
         
@@ -102,6 +108,7 @@ class WebUI:
                             {
                                 'pdf': t('process_pdf_with_watermark'),
                                 'markdown': t('convert_md_to_pdf_with_watermark'),
+                                'markdown_with_images': t('convert_md_with_images_to_pdf'),
                                 'watermark_only': t('generate_watermark_only'),
                             },
                             value='pdf'
@@ -120,16 +127,16 @@ class WebUI:
                     with self.watermark_card_content:
                         self.watermark_title_label = ui.label(t('watermark_type_title')).classes('section-title')
                         
-                        # 现代化布局：使用简单的column布局
+                        # 固定选项顺序，确保 Grid nth-child 稳定
                         self.watermark_type_radio = ui.radio(
                             {
                                 'text': t('text_watermark_recommended'),
                                 'image': t('image_watermark'),
+                                'none': t('no_watermark'),
                             },
                             value='text'
-                        ).props('inline').classes('w-full')
-                            
-                        
+                        ).props('inline').classes('w-full watermark-radio-inline')
+
                         # 文本水印输入框和日期选项
                         with ui.column().bind_visibility_from(self.watermark_type_radio, 'value', lambda v: v == 'text').classes('w-full gap-2'):
                             self.watermark_text_input = ui.input(
@@ -166,74 +173,59 @@ class WebUI:
                 def update_watermark_mode_behavior(e=None, skip_js=False):
                     mode = self.mode_radio.value
                     is_watermark_only = (mode == 'watermark_only')
+                    is_markdown = (mode in ['markdown', 'markdown_with_images'])
+
+                    # 1. Logic level check
+                    if self.watermark_type_radio.value == 'none' and not is_markdown:
+                        self.watermark_type_radio.value = 'text'
+
+                    # 2. UI level visibility via JS (Stable Grid)
+                    if not skip_js:
+                        def update_ui():
+                            none_label = t('no_watermark')
+                            image_label = t('image_watermark')
+                            
+                            js_code = f'''
+                                (function() {{
+                                    const findRadio = (label) => {{
+                                        const allRadios = document.querySelectorAll('div[role="radio"]');
+                                        for (const r of allRadios) {{
+                                            if (r.getAttribute('aria-label') === label) return r;
+                                            const labelEl = r.querySelector('.q-radio__label');
+                                            if (labelEl && labelEl.innerText.trim() === label) return r;
+                                        }}
+                                        return null;
+                                    }};
+
+                                    const noneRadio = findRadio("{none_label}");
+                                    const imageRadio = findRadio("{image_label}");
+                                    
+                                    if (noneRadio) {{
+                                        noneRadio.style.display = { "''" if is_markdown else "'none'" };
+                                    }}
+                                    
+                                    if (imageRadio) {{
+                                        if ({ "true" if is_watermark_only else "false" }) {{
+                                            imageRadio.style.opacity = '0.5';
+                                            imageRadio.style.pointerEvents = 'none';
+                                        }} else {{
+                                            imageRadio.style.opacity = '1';
+                                            imageRadio.style.pointerEvents = 'auto';
+                                        }}
+                                    }}
+                                }})();
+                            '''
+                            ui.run_javascript(js_code)
+                        
+                        ui.timer(0.1, update_ui, once=True)
 
                     # Show/hide generate watermark button
                     if self.generate_watermark_button_container:
                         self.generate_watermark_button_container.set_visibility(is_watermark_only)
 
-                    # Update watermark type options based on mode
-                    if is_watermark_only:
-                        # In watermark_only mode, force text watermark and disable image option
-                        self.watermark_type_radio.value = 'text'
-                        # Disable image option via JavaScript (only when not skipping JS)
-                        if not skip_js:
-                            def disable_image_option():
-                                ui.run_javascript(f'''
-                                    (function() {{
-                                        // Find all radio div elements with aria-label "图片水印"
-                                        const imageRadios = document.querySelectorAll('div[role="radio"][aria-label="图片水印"]');
-                                        for (const radio of imageRadios) {{
-                                            // Check if this radio belongs to watermark type (not operation mode)
-                                            const radioGroup = radio.closest('.q-option-group');
-                                            if (radioGroup && radioGroup.querySelector('div[aria-label="文本水印"]')) {{
-                                                // This is the watermark type radio group
-                                                radio.style.opacity = '0.5';
-                                                radio.style.cursor = 'not-allowed';
-                                                radio.style.pointerEvents = 'none';
-                                                radio.setAttribute('aria-disabled', 'true');
-                                                // Also disable the input if it exists
-                                                const input = radio.querySelector('input[type="radio"]');
-                                                if (input) {{
-                                                    input.disabled = true;
-                                                }}
-                                                break;
-                                            }}
-                                        }}
-                                    }})();
-                                ''')
-                            # Use timer to ensure DOM is ready
-                            ui.timer(0.1, disable_image_option, once=True)
-                    else:
-                        # In other modes, enable image option (only when not skipping JS)
-                        if not skip_js:
-                            def enable_image_option():
-                                ui.run_javascript(f'''
-                                    (function() {{
-                                        // Find all radio div elements with aria-label "图片水印"
-                                        const imageRadios = document.querySelectorAll('div[role="radio"][aria-label="图片水印"]');
-                                        for (const radio of imageRadios) {{
-                                            // Check if this radio belongs to watermark type (not operation mode)
-                                            const radioGroup = radio.closest('.q-option-group');
-                                            if (radioGroup && radioGroup.querySelector('div[aria-label="文本水印"]')) {{
-                                                // This is the watermark type radio group
-                                                radio.style.opacity = '1';
-                                                radio.style.cursor = 'pointer';
-                                                radio.style.pointerEvents = 'auto';
-                                                radio.removeAttribute('aria-disabled');
-                                                // Also enable the input if it exists
-                                                const input = radio.querySelector('input[type="radio"]');
-                                                if (input) {{
-                                                    input.disabled = false;
-                                                }}
-                                                break;
-                                            }}
-                                        }}
-                                    }})();
-                                ''')
-                            # Use timer to ensure DOM is ready
-                            ui.timer(0.1, enable_image_option, once=True)
-
                 update_watermark_mode_behavior(skip_js=True)
+                # Ensure the first render also handles JS after UI is fully built
+                ui.timer(0.2, lambda: update_watermark_mode_behavior(skip_js=False), once=True)
                 self.mode_radio.on('update:model-value', lambda e: update_watermark_mode_behavior(e))
 
                 with ui.card().classes('card-compact file-selection-dynamic row-span-2'):
@@ -295,7 +287,7 @@ class WebUI:
                     def update_file_selection_visibility(e=None):
                         mode = self.mode_radio.value
                         file_upload_needed = (mode != 'watermark_only')
-                        markdown_options_needed = mode == 'markdown'
+                        markdown_options_needed = (mode == 'markdown')
 
                         if file_upload_needed:
                             self.file_selection_container.classes(remove='disabled-section')
@@ -744,6 +736,7 @@ class WebUI:
         
         if config['mode'] != 'watermark_only':
             config['type'] = self.watermark_type_radio.value
+            config['no_watermark'] = (config['type'] == 'none')
             if config['type'] == 'text':
                 config['text'] = self.watermark_text_input.value or 'Watermark'
                 config['add_date'] = self.add_date_checkbox.value
@@ -792,52 +785,56 @@ class WebUI:
             selected_paths: List[Path] = [
                 Path(p) for p in self.uploaded_files.values() if Path(p).is_file()
             ]
-            selected_pdf_files: List[Path] = [
-                p for p in selected_paths if p.suffix.lower() == '.pdf'
-            ]
-            selected_md_files: List[Path] = [
-                p for p in selected_paths if p.suffix.lower() in ('.md', '.markdown', '.MD', '.MARKDOWN')
-            ]
+            
+            mode = self.config['mode']
+            
+            if mode == 'markdown_with_images':
+                md_files = [p for p in selected_paths if p.suffix.lower() in ('.md', '.markdown')]
+                if len(md_files) != 1:
+                    ui.notify('Please upload exactly ONE markdown file and its images for this mode.', type='negative', position='top')
+                    return
+                main_md = md_files[0]
+                # Prepare a dedicated directory for this markdown and its images
+                import shutil
+                import uuid
+                job_id = str(uuid.uuid4())
+                job_dir = Path('temp_uploads') / job_id
+                job_dir.mkdir(parents=True, exist_ok=True)
+                
+                new_main_md = job_dir / main_md.name
+                for p in selected_paths:
+                    shutil.copy2(p, job_dir / p.name)
+                
+                # Update paths to point to the job directory
+                selected_paths = [job_dir / p.name for p in selected_paths]
+                selected_pdf_files = []
+                selected_md_files = [new_main_md]
+            else:
+                selected_pdf_files = [p for p in selected_paths if p.suffix.lower() == '.pdf']
+                selected_md_files = [p for p in selected_paths if p.suffix.lower() in ('.md', '.markdown')]
             
             # Validate files for 'pdf' processing mode
-            if self.config['mode'] == 'pdf':
+            if mode == 'pdf':
                 non_pdf_files = [
                     p for p in selected_paths
-                    if p.suffix.lower() != '.pdf' # Only allow PDF files in this mode
+                    if p.suffix.lower() != '.pdf'
                 ]
                 if non_pdf_files:
                     found_formats = sorted(list(set(p.suffix.lower() for p in non_pdf_files)))
                     formats_str = ', '.join(found_formats)
                     ui.notify(t('non_pdf_files_in_pdf_mode_error', formats_found=formats_str), type='negative', position='top')
-                    self.process_button.enable()
                     return
 
-            upload_dir = Path('temp_uploads')
-            if upload_dir.exists():
-                current_files = {Path(p).resolve() for p in self.uploaded_files.values()}
-                for p in upload_dir.iterdir():
-                    if not p.is_file():
-                        continue
-                    if p.resolve() in current_files:
-                        continue
-                    if p.name.startswith('watermark_'):
-                        continue
-                    try:
-                        p.unlink()
-                    except Exception:
-                        pass
-            
             output_dir = Path('output')
             files_to_check = selected_pdf_files + selected_md_files
             
-            # Pre-calculate target paths to detect conflicts
             target_map: Dict[Path, Path] = {}
             conflicts: List[Path] = []
             
             for p in files_to_check:
-                if self.config['mode'] == 'pdf':
+                if mode == 'pdf':
                     out_name = p.name
-                elif self.config['mode'] == 'markdown':
+                elif mode in ['markdown', 'markdown_with_images']:
                     if self.config.get('rename_by_title'):
                         title = extract_h1_title(p)
                         base_name = title if title else p.stem
@@ -852,41 +849,25 @@ class WebUI:
                 if out_path.exists():
                     conflicts.append(out_path)
             
-            conflict_strategy = 'rename'  # Default: Coexist
-            
-            if conflicts and self.config['mode'] != 'watermark_only':
+            conflict_strategy = 'rename'
+            if conflicts and mode != 'watermark_only':
                 result = await self.show_conflict_dialog(len(conflicts))
                 if not result:
-                    self.process_button.enable()
                     return
                 conflict_strategy = result
 
-            # Filter inputs based on strategy
-            final_pdf_files = []
-            final_md_files = []
+            final_pdf_files = selected_pdf_files
+            final_md_files = selected_md_files
             
             if conflict_strategy == 'skip':
                 final_pdf_files = [p for p in selected_pdf_files if not target_map.get(p, Path('')).exists()]
                 final_md_files = [p for p in selected_md_files if not target_map.get(p, Path('')).exists()]
-                
-                if not final_pdf_files and not final_md_files:
-                    ui.notify(t('no_files_to_process'), type='warning', position='top')
-                    self.process_button.enable()
-                    return
-            else:
-                final_pdf_files = selected_pdf_files
-                final_md_files = selected_md_files
-                
-            # Update expected_outputs for UI
-            expected_outputs: List[Path] = []
             
-            # Helper to predict output path based on strategy
+            expected_outputs: List[Path] = []
             def predict_output(p):
                 base_out = target_map[p]
-                # Ensure .pdf suffix for markdown files, even if the target_map[p] somehow didn't
                 if p.suffix.lower() in ['.md', '.markdown'] and base_out.suffix.lower() != '.pdf':
                     base_out = base_out.with_suffix('.pdf')
-
                 if conflict_strategy == 'overwrite':
                     return base_out
                 elif conflict_strategy == 'rename' and base_out.exists():
@@ -904,16 +885,12 @@ class WebUI:
             expected_outputs.extend([predict_output(p) for p in final_md_files])
 
             if expected_outputs:
-                # Add new files to the beginning of the list, avoiding duplicates
                 for out_path in reversed(expected_outputs):
                     if out_path in self.processed_files:
                         self.processed_files.remove(out_path)
                     self.processed_files.insert(0, out_path)
-                
-                # Initialize status for these specific OUTPUT files
                 for out_path in expected_outputs:
                     self.file_processing_status[out_path] = 'pending'
-                
                 self.processing_progress = (0, len(expected_outputs))
                 self.update_file_list()
 
@@ -922,129 +899,59 @@ class WebUI:
             self.update_file_list()
             
             output_dir.mkdir(exist_ok=True)
-            
             watermark_image: Optional[str] = None
             success = False
             output_files: List[Path] = []
             
             try:
-                if self.config['mode'] == 'watermark_only':
-                    # Use unified watermark generation helper for watermark_only mode
+                if mode == 'watermark_only':
                     watermark_path = self._generate_watermark_from_config(self.config)
-                    if watermark_path:
-                        ui.notify(t('watermark_generated_successfully'), type='positive', position='top')
-                        success = True
-                    else:
-                        ui.notify(t('watermark_generation_failed'), type='negative', position='top')
-
+                    success = bool(watermark_path)
                 else:
-                    watermark_image = setup_watermark_image(self.config, save_to_output=False)
-                    if not watermark_image:
-                        ui.notify(t('watermark_image_not_found'), type='negative', position='top')
-                        return
+                    if not self.config.get('no_watermark', False):
+                        watermark_image = setup_watermark_image(self.config, save_to_output=False)
+                        if not watermark_image:
+                            ui.notify(t('watermark_image_not_found'), type='negative', position='top')
+                            return
                     
-                    # Process files one by one for real-time UI updates
-                    if self.config['mode'] == 'pdf':
-                        if final_pdf_files:
-                            success, output_files = await self.process_files_individually(
-                                final_pdf_files,
-                                'pdf',
-                                watermark_image,
-                                predicted_output_map={p: target_map[p] for p in final_pdf_files},
-                                conflict_strategy=conflict_strategy,
-                                watermark_type=self.config.get('watermark_type', 'grid'),
-                                horizontal_boxes=self.config.get('horizontal_boxes', 3),
-                                vertical_boxes=self.config.get('vertical_boxes', 6),
-                                angle=self.config.get('angle', 45),
-                                opacity=self.config.get('opacity', 0.2),
-                                image_scale=self.config.get('image_scale', 1.0),
-                            )
-                        elif final_md_files:
-                            # Filter out keys that conflict with positional arguments
-                            config_kwargs = {k: v for k, v in self.config.items() if k not in ['mode']}
-                            success, output_files = await self.process_files_individually(
-                                final_md_files,
-                                'markdown',
-                                watermark_image,
-                                predicted_output_map={p: target_map[p] for p in final_md_files},
-                                conflict_strategy=conflict_strategy,
-                                **config_kwargs
-                            )
-                        else:
-                            ui.notify(t('no_files_found'), type='warning', position='top')
-                            return
-                    else:
-                        if not final_md_files:
-                            ui.notify(t('no_markdown_files_selected'), type='warning', position='top')
-                            return
-                        # Filter out keys that conflict with positional arguments
-                        config_kwargs = {k: v for k, v in self.config.items() if k not in ['mode']}
+                    if mode == 'pdf':
                         success, output_files = await self.process_files_individually(
-                            final_md_files,
-                            'markdown',
-                            watermark_image,
+                            final_pdf_files, 'pdf', watermark_image,
+                            predicted_output_map={p: target_map[p] for p in final_pdf_files},
+                            conflict_strategy=conflict_strategy,
+                            **{k: v for k, v in self.config.items() if k not in ['mode']}
+                        )
+                    else: # markdown or markdown_with_images
+                        success, output_files = await self.process_files_individually(
+                            final_md_files, 'markdown', watermark_image,
                             predicted_output_map={p: target_map[p] for p in final_md_files},
                             conflict_strategy=conflict_strategy,
-                            **config_kwargs
+                            **{k: v for k, v in self.config.items() if k not in ['mode']}
                         )
                     
-                    if watermark_image and self.config['mode'] != 'watermark_only':
+                    if watermark_image and not self.config.get('no_watermark', False):
                         cleanup_generated_watermark(watermark_image, self.config)
-                
-                if success and output_files:
-                    # No need to overwrite processed_files here as we did it at start
-                    # But if names changed during processing (e.g. conflict resolution changed name differently than predicted),
-                    # process_files_individually should handle it.
-                    
-                    # Update progress based on completed outputs
-                    completed_count = len([f for f in output_files if f.exists()])
-                    self.processing_progress = (completed_count, len(expected_outputs))
-                    self.update_file_list()
                 
                 if success:
                     ui.notify(t('processing_successful'), type='positive', position='top')
                 else:
                     ui.notify(t('processing_failed'), type='negative', position='top')
             
-            except Exception as e:
-                ui.notify(t('error', error=str(e)), type='negative', position='top')
-                success = False
-            
             finally:
                 self.is_processing = False
-                self.load_existing_output_files()  # Reload files from disk to ensure consistency
+                self.load_existing_output_files()
                 self.update_file_list()
                 self.process_button.enable()
+                self.uploaded_files.clear()
+                self.recreate_upload_widget()
                 
-                # Clear uploaded files after processing is complete
-                # This ensures that uploaded files are cleared so new files won't be processed together with old ones
-                had_uploaded_files = bool(self.uploaded_files)
-                
-                if had_uploaded_files:
-                    # Clear the uploaded files dictionary
-                    self.uploaded_files.clear()
-                    
-                    # Clear temporary uploaded files (but keep watermark files)
-                    upload_dir = Path('temp_uploads')
-                    if upload_dir.exists():
-                        for p in upload_dir.iterdir():
-                            if not p.is_file():
-                                continue
-                            # Keep watermark files
-                            if p.name.startswith('watermark_'):
-                                continue
-                            try:
-                                p.unlink()
-                            except Exception:
-                                pass
-                    
-                    # Update uploaded files label
-                    if self.uploaded_files_label:
-                        self.uploaded_files_label.text = ''
-                    
-                    # Recreate the upload widget to reset its state completely
-                    # This ensures a clean state without any residual file information
-                    self.recreate_upload_widget()
+                # Cleanup job directory if created
+                if mode == 'markdown_with_images' and 'job_id' in locals():
+                    try:
+                        import shutil
+                        shutil.rmtree(Path('temp_uploads') / job_id)
+                    except:
+                        pass
         
         except Exception as e:
             ui.notify(t('configuration_error', error=str(e)), type='negative', position='top')
@@ -1054,19 +961,25 @@ class WebUI:
         """Process a single file."""
         try:
             if mode == 'pdf':
-                # Process PDF file
-                success = await asyncio.to_thread(
-                    add_watermark_to_file,
-                    file_path,
-                    output_file,
-                    watermark_image,
-                    kwargs.get('watermark_type', 'grid'),
-                    kwargs.get('opacity', 0.2),
-                    kwargs.get('angle', 45),
-                    kwargs.get('image_scale', 1.0),
-                    horizontal_boxes=kwargs.get('horizontal_boxes', 3),
-                    vertical_boxes=kwargs.get('vertical_boxes', 6)
-                )
+                if watermark_image:
+                    # Process PDF file with watermark
+                    success = await asyncio.to_thread(
+                        add_watermark_to_file,
+                        file_path,
+                        output_file,
+                        watermark_image,
+                        kwargs.get('watermark_type', 'grid'),
+                        kwargs.get('opacity', 0.2),
+                        kwargs.get('angle', 45),
+                        kwargs.get('image_scale', 1.0),
+                        horizontal_boxes=kwargs.get('horizontal_boxes', 3),
+                        vertical_boxes=kwargs.get('vertical_boxes', 6)
+                    )
+                else:
+                    # No watermark, just copy the file
+                    import shutil
+                    shutil.copy2(str(file_path), str(output_file))
+                    success = True
             elif mode == 'markdown':
                 # First convert markdown to PDF
                 from core.markdown_processor import md_to_pdf_with_mermaid_async
