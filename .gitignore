@@ -64,3 +64,4 @@ watermarks/
 
 # Temporary uploads for web UI
 temp_uploads/
+/.claude
